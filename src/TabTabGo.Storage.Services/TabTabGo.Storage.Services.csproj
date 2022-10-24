@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Version>$(VersionSuffix)</Version>
+    <!--<VersionSuffix>$(VersionSuffix)</VersionSuffix>-->
+    <Product>TabTabGo Storage WebApi</Product>
+    <Copyright>Copyright 2018</Copyright>
+    <PackageTags>Core</PackageTags>
+    <PackageReleaseNotes></PackageReleaseNotes>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Company>TabTabGo</Company>
+    <Authors>TabTabGo</Authors>
+    <Description>Storage WebApi for TabTabGo</Description>
+    <RootNamespace>TabTabGo.Storage.Services</RootNamespace>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" Version="2.80.3" />
+    <PackageReference Include="TabTabGo.Core.Services" Version="6.0.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,81 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.28803.202
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{59724D92-42F8-43E3-BE8F-6955D6A05B1F}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TabTabGo.Storage", "src\TabTabGo.Storage\TabTabGo.Storage.csproj", "{6D42FCFA-B1A5-4539-A196-80243544CDA9}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TabTabGo.Storage.Azure", "src\TabTabGo.Storage.AzureStorage\TabTabGo.Storage.Azure.csproj", "{3C739B48-8B9E-43C5-8926-00DB69944BE1}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TabTabGo.Storage.FileStorage", "src\TabTabGo.Storage.FileStorage\TabTabGo.Storage.FileStorage.csproj", "{0F615BF5-9F8F-4912-8FFD-7A07B203A675}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{C24DBA9E-6511-4321-A77D-978804E26856}"
+	ProjectSection(SolutionItems) = preProject
+		tools\CredentialProvider.VSS.exe = tools\CredentialProvider.VSS.exe
+		tools\nuget.exe = tools\nuget.exe
+		tools\packnpush.bat = tools\packnpush.bat
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "test", "test", "{4CD661E7-2268-406C-A8F7-6996320AE464}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TabTabGo.Storage.Data.EF", "src\TabTabGo.Storage.Data.EF\TabTabGo.Storage.Data.EF.csproj", "{7463063D-A7C2-48B7-8945-7012C60DAB2B}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TabTabGo.Storage.Services", "src\TabTabGo.Storage.Services\TabTabGo.Storage.Services.csproj", "{F743735C-1146-48A6-AFA7-FE3371EC8E67}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TabTabGo.Storage.WebApi", "src\TabTabGo.Storage.WebApi\TabTabGo.Storage.WebApi.csproj", "{5B4D7776-91F6-4CCD-90F6-9A2D0D97FA0A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TabTabGo.Storage.Test", "tests\TabTabGo.Storage.Test\TabTabGo.Storage.Test.csproj", "{BFBC5083-BDE4-47FC-8C5D-4E4EB603E615}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6D42FCFA-B1A5-4539-A196-80243544CDA9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6D42FCFA-B1A5-4539-A196-80243544CDA9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6D42FCFA-B1A5-4539-A196-80243544CDA9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6D42FCFA-B1A5-4539-A196-80243544CDA9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3C739B48-8B9E-43C5-8926-00DB69944BE1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3C739B48-8B9E-43C5-8926-00DB69944BE1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3C739B48-8B9E-43C5-8926-00DB69944BE1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3C739B48-8B9E-43C5-8926-00DB69944BE1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0F615BF5-9F8F-4912-8FFD-7A07B203A675}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0F615BF5-9F8F-4912-8FFD-7A07B203A675}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0F615BF5-9F8F-4912-8FFD-7A07B203A675}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0F615BF5-9F8F-4912-8FFD-7A07B203A675}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7463063D-A7C2-48B7-8945-7012C60DAB2B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7463063D-A7C2-48B7-8945-7012C60DAB2B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7463063D-A7C2-48B7-8945-7012C60DAB2B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7463063D-A7C2-48B7-8945-7012C60DAB2B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F743735C-1146-48A6-AFA7-FE3371EC8E67}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F743735C-1146-48A6-AFA7-FE3371EC8E67}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F743735C-1146-48A6-AFA7-FE3371EC8E67}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F743735C-1146-48A6-AFA7-FE3371EC8E67}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5B4D7776-91F6-4CCD-90F6-9A2D0D97FA0A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5B4D7776-91F6-4CCD-90F6-9A2D0D97FA0A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5B4D7776-91F6-4CCD-90F6-9A2D0D97FA0A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5B4D7776-91F6-4CCD-90F6-9A2D0D97FA0A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BFBC5083-BDE4-47FC-8C5D-4E4EB603E615}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BFBC5083-BDE4-47FC-8C5D-4E4EB603E615}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BFBC5083-BDE4-47FC-8C5D-4E4EB603E615}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BFBC5083-BDE4-47FC-8C5D-4E4EB603E615}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{6D42FCFA-B1A5-4539-A196-80243544CDA9} = {59724D92-42F8-43E3-BE8F-6955D6A05B1F}
+		{3C739B48-8B9E-43C5-8926-00DB69944BE1} = {59724D92-42F8-43E3-BE8F-6955D6A05B1F}
+		{0F615BF5-9F8F-4912-8FFD-7A07B203A675} = {59724D92-42F8-43E3-BE8F-6955D6A05B1F}
+		{7463063D-A7C2-48B7-8945-7012C60DAB2B} = {59724D92-42F8-43E3-BE8F-6955D6A05B1F}
+		{F743735C-1146-48A6-AFA7-FE3371EC8E67} = {59724D92-42F8-43E3-BE8F-6955D6A05B1F}
+		{5B4D7776-91F6-4CCD-90F6-9A2D0D97FA0A} = {59724D92-42F8-43E3-BE8F-6955D6A05B1F}
+		{BFBC5083-BDE4-47FC-8C5D-4E4EB603E615} = {4CD661E7-2268-406C-A8F7-6996320AE464}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {97F5FDA6-9318-43D7-AE3C-9235B6931C3C}
+	EndGlobalSection
+EndGlobal

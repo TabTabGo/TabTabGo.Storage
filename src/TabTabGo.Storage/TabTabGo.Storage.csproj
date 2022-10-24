@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Version>$(VersionSuffix)</Version>
+
+    <Authors>TabTabGo</Authors>
+    <Company>TabTabGo</Company>
+    <Product>TabTabGo Storage Contract</Product>
+    <Description>TabTabGo Storage Interfaces and Abstract Implementation</Description>
+    <PackageProjectUrl>https://tabtabgo.visualstudio.com/TabTabGo.Libraries</PackageProjectUrl>
+    <RepositoryUrl>https://tabtabgo.pkgs.visualstudio.com/_packaging/TabTabGo.Libraries/nuget/v3/index.json</RepositoryUrl>
+    <Copyright>Copyright 2017</Copyright>
+    <PackageTags>Storage</PackageTags>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Http" Version="2.2.2" />
+    <PackageReference Include="TabTabGo.Core" Version="6.0.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Entities\" />
+  </ItemGroup>
+
+</Project>

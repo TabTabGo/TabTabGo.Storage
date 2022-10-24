@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+
+    <TargetFramework>net6.0</TargetFramework>
+    <Version>$(VersionSuffix)</Version>
+    <!--<VersionSuffix>$(VersionSuffix)</VersionSuffix>-->
+    <Product>TabTabGo Storage WebApi</Product>
+    <Copyright>Copyright 2018</Copyright>
+    <PackageTags>Core</PackageTags>
+    <PackageReleaseNotes></PackageReleaseNotes>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Company>TabTabGo</Company>
+    <Authors>TabTabGo</Authors>
+    <Description>Storage WebApi for TabTabGo</Description>
+    <RootNamespace>TabTabGo.Storage.WebApi</RootNamespace>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TabTabGo.Storage.Data.EF\TabTabGo.Storage.Data.EF.csproj" />
+    <ProjectReference Include="..\TabTabGo.Storage.Services\TabTabGo.Storage.Services.csproj" />
+    <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
+  </ItemGroup>
+
+</Project>
