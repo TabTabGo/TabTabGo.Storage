@@ -4,5 +4,6 @@ public enum StorageProvider
 {
     Local = 0,
     AzureBlob = 10,
-    AzureFile = 12
+    AzureFile = 12,
+    AwsS3 = 20
 }

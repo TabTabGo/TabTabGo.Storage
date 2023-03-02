@@ -10,7 +10,7 @@
     <Description>File System Storage implementation of TabTabGo Storage</Description>
     <PackageProjectUrl>https://tabtabgo.visualstudio.com/TabTabGo.Libraries</PackageProjectUrl>
     <RepositoryUrl>https://tabtabgo.pkgs.visualstudio.com/_packaging/TabTabGo.Libraries/nuget/v3/index.json</RepositoryUrl>
-    <Copyright>Copyright 2017</Copyright>
+    <Copyright>Copyright 2023</Copyright>
     <PackageTags>Storage File</PackageTags>
     <RootNamespace>TabTabGo.Storage.FileStorage</RootNamespace>
     <Nullable>enable</Nullable>

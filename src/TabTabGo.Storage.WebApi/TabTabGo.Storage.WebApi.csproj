@@ -23,4 +23,8 @@
     <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="TabTabGo.Core.Api" Version="6.0.6.8" />
+  </ItemGroup>
+
 </Project>

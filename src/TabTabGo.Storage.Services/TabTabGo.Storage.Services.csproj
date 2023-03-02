@@ -5,7 +5,7 @@
     <Version>$(VersionSuffix)</Version>
     <!--<VersionSuffix>$(VersionSuffix)</VersionSuffix>-->
     <Product>TabTabGo Storage WebApi</Product>
-    <Copyright>Copyright 2018</Copyright>
+    <Copyright>Copyright 2023</Copyright>
     <PackageTags>Core</PackageTags>
     <PackageReleaseNotes></PackageReleaseNotes>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>

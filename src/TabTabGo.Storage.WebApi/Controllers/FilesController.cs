@@ -3,14 +3,15 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
 using TabTabGo.Core.Infrastructure.Data;
 using TabTabGo.Storage.Entities;
 using TabTabGo.Storage.Enums;
 using TabTabGo.Storage.Services;
-
+using TabTabGo.Core.WebApi;
 namespace TabTabGo.Storage.WebApi.Controllers
 {
-    public class FileBaseController<TFile> : ControllerWriteReadBase<TFile, long, IFileService<TFile>> where TFile : class, IFile
+    public class FileBaseController<TFile> : <TFile, long, IFileService<TFile>> where TFile : class, IFile
     {
         public FileBaseController(IFileService<TFile> service, ILogger<FileBaseController<TFile>> logger, IUnitOfWork unitOfWork) : base(service, logger, unitOfWork)
         {
