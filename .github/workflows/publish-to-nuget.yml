@@ -1,0 +1,27 @@
+name: Publish to NuGet
+on:
+  push:
+    tags:
+      - '*.*.*' # only publish on tag with semantic versioning
+jobs:
+  build-and-publish-TabtTabGo-Storage:
+    runs-on: ubuntu-latest
+    env: 
+      Package_Name: 'TabTabGo.Storage'
+      Project_Path: 'src/TabTabGo.Storage/TabTabGo.Storage.csproj'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Setup .NET Core
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: '6.0.x' # replace with desired version
+
+      - name: Build and pack project
+        run: dotnet pack -c Release --no-build --include-symbols -p:PackageVersion=1.0.0 -p:PackageId=${Package_Name} -o bin/Release --include-source ${Project_Path}
+
+      - name: Publish package to NuGet
+        run: dotnet nuget push bin/Release/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
