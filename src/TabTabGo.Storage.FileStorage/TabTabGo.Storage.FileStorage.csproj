@@ -8,12 +8,13 @@
     <Company>TabTabGo</Company>
     <Product>TabTabGo File System Storage</Product>
     <Description>File System Storage implementation of TabTabGo Storage</Description>
-    <PackageProjectUrl>https://tabtabgo.visualstudio.com/TabTabGo.Libraries</PackageProjectUrl>
-    <RepositoryUrl>https://tabtabgo.pkgs.visualstudio.com/_packaging/TabTabGo.Libraries/nuget/v3/index.json</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/TabTabGo/TabTabGo.Storage</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/TabTabGo/TabTabGo.Storage</RepositoryUrl>
     <Copyright>Copyright 2023</Copyright>
     <PackageTags>Storage File</PackageTags>
     <RootNamespace>TabTabGo.Storage.FileStorage</RootNamespace>
     <Nullable>enable</Nullable>
+    <PackageIcon>logo@32.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,6 +26,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\assets\logo@32.png">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+      <Link>logo@32.png</Link>
+    </None>
   </ItemGroup>
 
 </Project>

@@ -5,7 +5,16 @@
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <OutputType>Library</OutputType>
-        <LangVersion>default</LangVersion>
+        <Version>$(VersionSuffix)</Version>
+        <Title>Storage using AWS S3</Title>
+        <Authors>TabTabGo</Authors>
+        <Description>Implement IStorageProvider with AWS S3 service</Description>
+        <Copyright>TabTabGo 2023</Copyright>
+        <PackageProjectUrl>https://github.com/TabTabGo/TabTabGo.Storage</PackageProjectUrl>
+        <PackageIcon>logo@32.png</PackageIcon>
+        <RepositoryUrl>https://github.com/TabTabGo/TabTabGo.Storage</RepositoryUrl>
+        <PackageTags>Storage AWS</PackageTags>
+        <IsPackable>true</IsPackable>
     </PropertyGroup>
 
     <ItemGroup>
@@ -14,6 +23,14 @@
 
     <ItemGroup>
       <PackageReference Include="AWSSDK.S3" Version="3.7.103.17" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Include="..\..\assets\logo@32.png">
+        <Pack>True</Pack>
+        <PackagePath></PackagePath>
+        <Link>logo@32.png</Link>
+      </None>
     </ItemGroup>
 
 </Project>

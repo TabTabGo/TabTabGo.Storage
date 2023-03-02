@@ -2,26 +2,83 @@ name: Publish to NuGet
 on:
   push:
     tags:
-      - '*.*.*' # only publish on tag with semantic versioning
+      - 'v*' # only publish on tag with semantic versioning
+
 jobs:
   build-and-publish-TabtTabGo-Storage:
     runs-on: ubuntu-latest
-    env: 
-      Package_Name: 'TabTabGo.Storage'
-      Project_Path: 'src/TabTabGo.Storage/TabTabGo.Storage.csproj'
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-
-      - name: Setup .NET Core
-        uses: actions/setup-dotnet@v1
+      - name: Publish to NuGet
+        uses: tabtabgo/publish-to-nuget-action@v1.3
         with:
-          dotnet-version: '6.0.x' # replace with desired version
-
-      - name: Build and pack project
-        run: dotnet pack -c Release --no-build --include-symbols -p:PackageVersion=1.0.0 -p:PackageId=${Package_Name} -o bin/Release --include-source ${Project_Path}
-
-      - name: Publish package to NuGet
-        run: dotnet nuget push bin/Release/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          project_path: 'src/TabTabGo.Storage/TabTabGo.Storage.csproj'
+          package_version: ${GITHUB_REF#refs/*/v}
+          package_name: 'TabTabGo.Storage'
+          nuget_api_key: ${{ secrets.NUGET_API_KEY }}
+  
+  build-and-publish-TabtTabGo-Storage.Services:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Publish to NuGet
+        uses: tabtabgo/publish-to-nuget-action@v1.3
+        with:
+          project_path: 'src/TabTabGo.Storage.Data.EF/TabTabGo.Storage.Services.csproj'
+          package_version: ${GITHUB_REF#refs/*/v}
+          package_name: 'TabTabGo.Storage.Services'
+          nuget_api_key: ${{ secrets.NUGET_API_KEY }}
+  
+  build-and-publish-TabtTabGo-Storage.Data.EF:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Publish to NuGet
+        uses: tabtabgo/publish-to-nuget-action@v1.3
+        with:
+          project_path: 'src/TabTabGo.Storage.Data.EF/TabTabGo.Storage.Data.EF.csproj'
+          package_version: ${GITHUB_REF#refs/*/v}
+          package_name: 'TabTabGo.Storage.Data.EF'
+          nuget_api_key: ${{ secrets.NUGET_API_KEY }}
+          
+  build-and-publish-TabtTabGo-Storage-Aws:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Publish to NuGet
+        uses: tabtabgo/publish-to-nuget-action@v1.3
+        with:
+          project_path: 'src/TabTabGo.Storage.Aws/TabTabGo.Storage.Aws.csproj'
+          package_version: ${GITHUB_REF#refs/*/v}
+          package_name: 'TabTabGo.Storage.Aws'
+          nuget_api_key: ${{ secrets.NUGET_API_KEY }}
+  
+  build-and-publish-TabtTabGo-Storage.Azure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Publish to NuGet
+        uses: tabtabgo/publish-to-nuget-action@v1.3
+        with:
+          project_path: 'src/TabTabGo.Storage.AzureStorage/TabTabGo.Storage.AzureStorage.csproj'
+          package_version: ${GITHUB_REF#refs/*/v}
+          package_name: 'TabTabGo.Storage.AzureStorage'
+          nuget_api_key: ${{ secrets.NUGET_API_KEY }}
+  
+  build-and-publish-TabtTabGo-Storage.Data.FileStorage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Publish to NuGet
+        uses: tabtabgo/publish-to-nuget-action@v1.3
+        with:
+          project_path: 'src/TabTabGo.Storage.FileStorage/TabTabGo.Storage.FileStorage.csproj'
+          package_version: ${GITHUB_REF#refs/*/v}
+          package_name: 'TabTabGo.Storage.FileStorage'
+          nuget_api_key: ${{ secrets.NUGET_API_KEY }}

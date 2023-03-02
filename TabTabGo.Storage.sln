@@ -12,12 +12,6 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TabTabGo.Storage.FileStorage", "src\TabTabGo.Storage.FileStorage\TabTabGo.Storage.FileStorage.csproj", "{0F615BF5-9F8F-4912-8FFD-7A07B203A675}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{C24DBA9E-6511-4321-A77D-978804E26856}"
-	ProjectSection(SolutionItems) = preProject
-		tools\CredentialProvider.VSS.exe = tools\CredentialProvider.VSS.exe
-		tools\nuget.exe = tools\nuget.exe
-		tools\packnpush.bat = tools\packnpush.bat
-		tools\PackagAndPush.sh = tools\PackagAndPush.sh
-	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "test", "test", "{4CD661E7-2268-406C-A8F7-6996320AE464}"
 EndProject

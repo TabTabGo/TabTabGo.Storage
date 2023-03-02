@@ -1,9 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
     <Version>$(VersionSuffix)</Version>
-    <!--<VersionSuffix>$(VersionSuffix)</VersionSuffix>-->
     <Product>TabTabGo Storage WebApi</Product>
     <Copyright>Copyright 2023</Copyright>
     <PackageTags>Core</PackageTags>
@@ -14,6 +12,9 @@
     <Description>Storage WebApi for TabTabGo</Description>
     <RootNamespace>TabTabGo.Storage.Services</RootNamespace>
     <Nullable>enable</Nullable>
+    <PackageProjectUrl>https://github.com/TabTabGo/TabTabGo.Storage</PackageProjectUrl>
+    <PackageIcon>logo@32.png</PackageIcon>
+    <RepositoryUrl>https://github.com/TabTabGo/TabTabGo.Storage</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +24,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\assets\logo@32.png">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+      <Link>logo@32.png</Link>
+    </None>
   </ItemGroup>
 
 </Project>

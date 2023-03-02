@@ -3,17 +3,18 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <Version>$(VersionSuffix)</Version>
-
     <Authors>TabTabGo</Authors>
     <Company>TabTabGo</Company>
     <Product>TabTabGo Storage Contract</Product>
     <Description>TabTabGo Storage Interfaces and Abstract Implementation</Description>
-    <PackageProjectUrl>https://tabtabgo.visualstudio.com/TabTabGo.Libraries</PackageProjectUrl>
-    <RepositoryUrl>https://tabtabgo.pkgs.visualstudio.com/_packaging/TabTabGo.Libraries/nuget/v3/index.json</RepositoryUrl>
-    <Copyright>Copyright 2017</Copyright>
+    <PackageProjectUrl>https://github.com/TabTabGo/TabTabGo.Storage</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/TabTabGo/TabTabGo.Storage</RepositoryUrl>
+    <Copyright>Copyright 2023</Copyright>
     <PackageTags>Storage</PackageTags>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+    <Title>TabTabGo Storage</Title>
+    <PackageIcon>logo@32.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +24,14 @@
 
   <ItemGroup>
     <Folder Include="Entities\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\assets\logo@32.png">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+      <Link>logo@32.png</Link>
+    </None>
   </ItemGroup>
 
 </Project>
