@@ -26,7 +26,7 @@ jobs:
       - name: Publish to NuGet
         uses: tabtabgo/publish-to-nuget-action@v1.3
         with:
-          project_path: 'src/TabTabGo.Storage.Data.EF/TabTabGo.Storage.Services.csproj'
+          project_path: 'src/TabTabGo.Storage.Services/TabTabGo.Storage.Services.csproj'
           package_version: ${GITHUB_REF#refs/*/v}
           package_name: 'TabTabGo.Storage.Services'
           nuget_api_key: ${{ secrets.NUGET_API_KEY }}
