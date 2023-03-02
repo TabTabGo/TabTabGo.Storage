@@ -18,7 +18,7 @@ jobs:
           package_name: 'TabTabGo.Storage'
           nuget_api_key: ${{ secrets.NUGET_API_KEY }}
   
-  build-and-publish-TabtTabGo-Storage.Services:
+  build-and-publish-TabtTabGo-Storage-Services:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -31,7 +31,7 @@ jobs:
           package_name: 'TabTabGo.Storage.Services'
           nuget_api_key: ${{ secrets.NUGET_API_KEY }}
   
-  build-and-publish-TabtTabGo-Storage.Data.EF:
+  build-and-publish-TabtTabGo-Storage-Data-EF:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -57,7 +57,7 @@ jobs:
           package_name: 'TabTabGo.Storage.Aws'
           nuget_api_key: ${{ secrets.NUGET_API_KEY }}
   
-  build-and-publish-TabtTabGo-Storage.Azure:
+  build-and-publish-TabtTabGo-Storage-Azure:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -70,7 +70,7 @@ jobs:
           package_name: 'TabTabGo.Storage.AzureStorage'
           nuget_api_key: ${{ secrets.NUGET_API_KEY }}
   
-  build-and-publish-TabtTabGo-Storage.Data.FileStorage:
+  build-and-publish-TabtTabGo-Storage-Data-FileStorage:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

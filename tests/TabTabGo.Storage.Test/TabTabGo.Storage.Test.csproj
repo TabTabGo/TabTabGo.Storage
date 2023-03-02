@@ -14,6 +14,7 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="6.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="6.0.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.1.0" />
+    <PackageReference Include="Moq" Version="4.18.4" />
     <PackageReference Include="TabTabGo.Core" Version="6.0.6.2" />
     <PackageReference Include="xunit" Version="2.4.1" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.4.3">
@@ -25,6 +26,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\TabTabGo.Storage.Aws\TabTabGo.Storage.Aws.csproj" />
     <ProjectReference Include="..\..\src\TabTabGo.Storage.AzureStorage\TabTabGo.Storage.Azure.csproj" />
+    <ProjectReference Include="..\..\src\TabTabGo.Storage.FileStorage\TabTabGo.Storage.FileStorage.csproj" />
     <ProjectReference Include="..\..\src\TabTabGo.Storage\TabTabGo.Storage.csproj" />
   </ItemGroup>
 

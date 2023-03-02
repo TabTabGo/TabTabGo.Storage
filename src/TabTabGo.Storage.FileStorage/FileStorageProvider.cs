@@ -30,9 +30,9 @@ public class FileStorageProvider : StorageProvider
 
         string dateTimeFolder = DateTime.Now.ToString(_pathService.PathSettings.DateFormat ?? "yyyyMMdd");
         string destinationDirectory = GetRootDirectory(container);
-
-        if (!Directory.Exists(destinationDirectory))
-            Directory.CreateDirectory(destinationDirectory);
+        var pathWithDate = Path.Combine(destinationDirectory, dateTimeFolder);
+        if (!Directory.Exists(pathWithDate))
+            Directory.CreateDirectory(pathWithDate);
 
         if (extension.StartsWith("."))
             extension = extension.Substring(1);
@@ -57,6 +57,7 @@ public class FileStorageProvider : StorageProvider
         if (File.Exists(defaultFileFullPath))
         {
             // TODO handle duplicate files
+            File.Delete(defaultFileFullPath);
         }
 
         //await FileUtility.WriteFileContentAsync(buffer, defaultFileFullPath, true);
