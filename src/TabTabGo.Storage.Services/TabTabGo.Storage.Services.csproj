@@ -6,7 +6,6 @@
     <Copyright>Copyright 2023</Copyright>
     <PackageTags>Core</PackageTags>
     <PackageReleaseNotes></PackageReleaseNotes>
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <Company>TabTabGo</Company>
     <Authors>TabTabGo</Authors>
     <Description>Storage WebApi for TabTabGo</Description>
