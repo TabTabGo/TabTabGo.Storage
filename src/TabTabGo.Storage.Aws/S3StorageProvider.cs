@@ -10,10 +10,15 @@ public class S3StorageProvider : StorageProvider
     private S3Configuration _configuration;
     private readonly AmazonS3Client _amazonS3Client;
     private readonly ILogger<S3StorageProvider> _logger;
+
+    public S3StorageProvider()
+    {
+        
+    }
     public S3StorageProvider(IOptions<S3Configuration> configuration, ILogger<S3StorageProvider> logger)
     {
         _logger = logger;
-        _configuration = configuration.Value;
+        _configuration = configuration?.Value ?? throw new ArgumentNullException(nameof(configuration));
         var region = RegionEndpoint.GetBySystemName(_configuration.Region);
         _amazonS3Client = new(_configuration.AccessKey, _configuration.SecretKey, region);
     }
