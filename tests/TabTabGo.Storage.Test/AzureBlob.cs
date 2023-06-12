@@ -33,9 +33,9 @@ namespace TabTabGo.Storage.Test
         {
             var storageProvider = new BlobStorageProvider(_config, _logger);
             var fileBytes = await File.ReadAllBytesAsync("test.png");
-            var fileId = await storageProvider.StoreAsync(fileBytes, ".png","test");
+            var fileId = await storageProvider.StoreAsync(fileBytes, ".png","Test");
 
-            var savedFileStream = await storageProvider.RetrieveAsync(fileId, "test");
+            var savedFileStream = await storageProvider.RetrieveAsync(fileId, "Test");
             var ms = new MemoryStream();
             await savedFileStream.CopyToAsync(ms);
 

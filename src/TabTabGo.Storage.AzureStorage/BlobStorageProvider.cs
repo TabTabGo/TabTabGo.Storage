@@ -1,6 +1,6 @@
 ﻿using System;
 using System.IO;
-
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 using Azure.Storage.Blobs;
@@ -130,7 +130,7 @@ public class BlobStorageProvider : StorageProvider
         _logger.LogTrace("Initialize Blob service ");
         // Create a blobServiceClient object which will be used to create a container client
         var blobServiceClient = new BlobServiceClient(_configuration.GetConnectionString("AzureStorageConnection"));
-
+        containerName = ConvertToValidDnsName(containerName);
         // get azure container
         // Create the container and return a container client object
         var containerClient = blobServiceClient.GetBlobContainerClient(containerName) ?? await blobServiceClient.CreateBlobContainerAsync(containerName);
@@ -142,4 +142,38 @@ public class BlobStorageProvider : StorageProvider
         return containerClient.GetBlobClient(fileIdentifier);
         
     }
+    
+    private static string ConvertToValidDnsName(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+        {
+            throw new ArgumentException("input cannot be null or empty");
+        }
+
+        // trim white spaces, convert to lowercase
+        input = input.Trim().ToLower();
+
+        // replace spaces with hyphens
+        input = input.Replace(" ", "-");
+
+        // remove invalid characters
+        input = Regex.Replace(input, @"[^a-z0-9\-]", "");
+
+        // truncate if necessary to meet DNS max length requirement
+        if (input.Length > 63)
+        {
+            input = input.Substring(0, 63);
+        }
+
+        // ensure the name doesn't start or end with a hyphen
+        input = input.Trim('-');
+
+        if (input.Length < 1)
+        {
+            throw new ArgumentException("Resulting string is empty");
+        }
+
+        return input;
+    }
+
 }
