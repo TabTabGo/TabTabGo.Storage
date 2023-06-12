@@ -38,7 +38,9 @@ public class BlobStorageProvider : StorageProvider
         var blockBlob = await GetBlob(filePath, container);
         using var memoryStream = new MemoryStream();
         await memoryStream.WriteAsync(buffer, 0, buffer.Length);
-        await blockBlob.UploadAsync(memoryStream);
+        memoryStream.Seek(0, SeekOrigin.Begin);
+        
+        var response = await blockBlob.UploadAsync(memoryStream);
 
         return filePath;
     }
@@ -119,9 +121,9 @@ public class BlobStorageProvider : StorageProvider
         // Create a blobServiceClient object which will be used to create a container client
         var blobServiceClient = new BlobServiceClient(_configuration.GetConnectionString("AzureStorageConnection"));
 
-
+        // get azure container
         // Create the container and return a container client object
-        BlobContainerClient containerClient = await blobServiceClient.CreateBlobContainerAsync(containerName);
+        var containerClient = blobServiceClient.GetBlobContainerClient(containerName) ?? await blobServiceClient.CreateBlobContainerAsync(containerName);
 
         // Create the container if it doesn't already exist.
         await containerClient.CreateIfNotExistsAsync();

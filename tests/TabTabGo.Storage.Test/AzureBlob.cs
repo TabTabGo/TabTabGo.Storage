@@ -13,16 +13,20 @@ namespace TabTabGo.Storage.Test
         IConfiguration _config;
         public AzureBlobTests()
         {
-            
+            _config = new ConfigurationBuilder()
+                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+                .AddEnvironmentVariables()
+                .AddUserSecrets<AzureBlobTests>()
+                .Build();
         }
         [Fact]
         public async Task AddToStorage()
         {
             var storageProvider = new BlobStorageProvider(_config);
             var fileBytes = await File.ReadAllBytesAsync("test.png");
-            var fileId = await storageProvider.StoreAsync(fileBytes, ".png");
+            var fileId = await storageProvider.StoreAsync(fileBytes, ".png","test");
 
-            var savedFileStream = await storageProvider.RetrieveAsync(fileId);
+            var savedFileStream = await storageProvider.RetrieveAsync(fileId, "test");
             var ms = new MemoryStream();
             await savedFileStream.CopyToAsync(ms);
 
