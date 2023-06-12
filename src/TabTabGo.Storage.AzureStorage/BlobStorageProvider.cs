@@ -8,16 +8,18 @@ using Azure.Storage.Blobs.Models;
 using Azure.Storage.Blobs.Specialized;
 using Azure.Storage.Sas;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace TabTabGo.Storage.AzureStorage;
 
 public class BlobStorageProvider : StorageProvider
 {
     private readonly IConfiguration _configuration;
-
-    public BlobStorageProvider(IConfiguration configuration)
+    private readonly ILogger<BlobStorageProvider> _logger;
+    public BlobStorageProvider(IConfiguration configuration, ILogger<BlobStorageProvider> logger)
     {
         _configuration = configuration;
+        _logger = logger;
     }
 
     public override async Task<string> StoreAsync(byte[] buffer, string extension = ".tmp",
@@ -36,12 +38,13 @@ public class BlobStorageProvider : StorageProvider
     public override async Task<string> StoreAsync(string filePath, byte[] buffer, string container = "unknown")
     {
         var blockBlob = await GetBlob(filePath, container);
+        _logger.LogTrace("Uploading blob {0} under container {1}", blockBlob.Name, blockBlob.BlobContainerName);
         using var memoryStream = new MemoryStream();
         await memoryStream.WriteAsync(buffer, 0, buffer.Length);
         memoryStream.Seek(0, SeekOrigin.Begin);
         
         var response = await blockBlob.UploadAsync(memoryStream);
-
+         _logger.LogTrace("Blob {0} under container {1} size {2} bytes uploaded with Sequance number: {3} , version no : {4}", blockBlob.Name, container, buffer.Length.ToString() , response.Value.BlobSequenceNumber.ToString(), response.Value.VersionId);
         return filePath;
     }
 
@@ -53,12 +56,13 @@ public class BlobStorageProvider : StorageProvider
     public override async Task<Stream> RetrieveAsync(string fileIdentifier, string container = "unknown")
     {
         var blockBlob = await GetBlob(fileIdentifier, container);
-
+        _logger.LogTrace("Retrieving blob {0} under container {1}", blockBlob.Name, blockBlob.BlobContainerName);
+        
         var memoryStream = new MemoryStream();
 
         // Download the blob's contents and save it to a file
         BlobDownloadInfo download = await blockBlob.DownloadAsync();
-
+        _logger.LogTrace("Blob {0} under container {1} of type {2} and size {3} bytes retrieved", fileIdentifier, container, download.BlobType.ToString(), download.ContentLength.ToString());
         await download.Content.CopyToAsync(memoryStream);
 
         memoryStream.Seek(0, SeekOrigin.Begin);
@@ -69,10 +73,15 @@ public class BlobStorageProvider : StorageProvider
     public override async Task DeleteAsync(string fileIdentifier, string container = "unknown")
     {
         var blockBlob = await GetBlob(fileIdentifier, container);
-
+        _logger.LogTrace("Deleting blob {0} under container {1}", fileIdentifier, container);
         if (await blockBlob.ExistsAsync())
         {
             await blockBlob.DeleteAsync();
+            _logger.LogTrace("Blob {0} under container {1} deleted", fileIdentifier, container);
+        }
+        else
+        {
+            _logger.LogWarning("Blob {0} under container {1} not found", fileIdentifier, container);
         }
     }
 
@@ -118,18 +127,19 @@ public class BlobStorageProvider : StorageProvider
             throw new Exception($"Configuration {"AzureStorageConnection"} is missing from the config file");
         }
 
+        _logger.LogTrace("Initialize Blob service ");
         // Create a blobServiceClient object which will be used to create a container client
         var blobServiceClient = new BlobServiceClient(_configuration.GetConnectionString("AzureStorageConnection"));
 
         // get azure container
         // Create the container and return a container client object
         var containerClient = blobServiceClient.GetBlobContainerClient(containerName) ?? await blobServiceClient.CreateBlobContainerAsync(containerName);
-
+        _logger.LogTrace("Get Blob container {0}", containerName);
         // Create the container if it doesn't already exist.
         await containerClient.CreateIfNotExistsAsync();
-
-        return containerClient.GetBlobClient(fileIdentifier);
+        _logger.LogTrace("Successfully create container {1} if nor exist", containerName);
         // Retrieve reference to a blob
-        //return containerClient.GetBlockBlobReference(fileIdentifier);
+        return containerClient.GetBlobClient(fileIdentifier);
+        
     }
 }
