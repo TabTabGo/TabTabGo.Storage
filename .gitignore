@@ -256,3 +256,5 @@ nuget.local.config
 artifacts/
 coverage/
 TestResults/
+__pycache__/
+*.pyc

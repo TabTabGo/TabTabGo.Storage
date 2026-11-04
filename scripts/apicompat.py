@@ -16,6 +16,7 @@ as a distinct break the way source compilers see it (spec 6.4 SB14, FileResult),
 SB21) are not API changes at all; both are covered by the README upgrade table and by tests.
 """
 import argparse
+import hashlib
 import pathlib
 import re
 import subprocess
@@ -38,28 +39,37 @@ PACKAGES = [
     ("TabTabGo.Storage.FileStorage", "TabTabGo.Storage.FileStorage", "net6.0"),
 ]
 
-# (substring of the suppression Target, spec 6.4 row, one-line reason). First match wins.
-RULES = [
-    ("FormFile", "SB4", "IFile.FormFile / File.FormFile removed; upload content is a FileUpload (ADR 0004)"),
-    ("CompositionRoot", "SB10", "LightInject composition roots removed; use AddTabTabGo...()"),
-    ("ImageSizeExtensions", "SB15", "ImageSizeExtensions moved from the global namespace to TabTabGo.Storage.Services"),
-    ("PathService", "SB13", "PathService takes IHostEnvironment instead of IHostingEnvironment"),
-    ("IPathService", "SB-A1", "IPathService.PathSettings { get; } is a new abstract member (custom implementers break)"),
-    ("S3StorageProvider", "SB11", "S3StorageProvider constructors; parameterless ctor and SetConfiguration are obsolete"),
-    ("BlobStorageProvider", "SB12", "BlobStorageProvider constructor takes BlobServiceClient + options; legacy ctor obsolete"),
-    ("IFileService", "SB22", "IFileService<TFile> gained Upload / Replace / ListAsync (and Delete(query) stays); implementers must add them"),
-    ("FileService`1.#ctor", "SB2", "FileService constructor: IUnitOfWork moved from TabTabGo.Core.Infrastructure.Data to TabTabGo.Core.Data (Core 8 API, spec 3.4)"),
-    ("FileService", "SB22", "FileService<TFile> constructor / member changes (Update(JsonObject) replaces Update(JObject), PostCreate, GetImage)"),
-    ("IStorageProvider", "SB7", "IStorageProvider members gained nullable annotations and default-interface additions; contract change"),
-    ("StorageProvider", "SB7", "StorageProvider base members; contract change"),
-    ("StorageDbContext", "SB18", "StorageDbContext maps File; OnConfiguring override removed"),
-    ("FileResult", "SB14", "FileResult fields became properties and the type is IAsyncDisposable"),
-    ("IFile", "SB4", "IFile member set changed (FormFile removed)"),
-    ("Entities.File", "SB4", "File.FormFile removed"),
-    ("S3Configuration", "SB11", "S3Configuration members (optional credentials, endpoint, timeout)"),
-    ("PathSettings", "SB-A1", "PathSettings: FileTypePaths indexer / TryGetPath / PublicBaseUrl"),
-    ("ImageService", "SB22", "ImageService constructor (options) and format handling"),
-]
+# Exact suppression targets -> (spec 6.4 row, reason). A break that is not listed here is NOT auto-labelled: --update fails and
+# lists it, so a new break needs a deliberate row (substring rules would have labelled an unrelated change by accident).
+EXACT = {
+    "T:TabTabGo.Storage.AzureStorage.AzureCompositionRoot": ("SB10", "LightInject composition root removed; use AddTabTabGoAzureBlobStorage()"),
+    "T:TabTabGo.Storage.FileStorage.FileCompositionRoot": ("SB10", "LightInject composition root removed; use AddTabTabGoFileStorage()"),
+    "M:TabTabGo.Storage.FileStorage.Services.PathService.#ctor(Microsoft.AspNetCore.Hosting.IHostingEnvironment,Microsoft.Extensions.Options.IOptions{TabTabGo.Storage.Services.PathSettings},Microsoft.Extensions.Logging.ILogger{TabTabGo.Storage.FileStorage.Services.PathService})":
+        ("SB13", "PathService takes IHostEnvironment instead of IHostingEnvironment"),
+    "T:ImageSizeExtensions": ("SB15", "ImageSizeExtensions moved from the global namespace to TabTabGo.Storage.Services"),
+    "M:TabTabGo.Storage.Services.FileService`1.#ctor(TabTabGo.Core.Infrastructure.Data.IUnitOfWork,Microsoft.Extensions.Logging.ILogger{TabTabGo.Storage.Services.FileService{`0}},TabTabGo.Storage.IStorageProvider,TabTabGo.Storage.Services.IImageService)":
+        ("SB2", "FileService constructor: IUnitOfWork moved from TabTabGo.Core.Infrastructure.Data to TabTabGo.Core.Data (Core 8 API, spec 3.4)"),
+    "M:TabTabGo.Storage.Entities.File.get_FormFile": ("SB4", "File.FormFile removed; upload content is a FileUpload (ADR 0004)"),
+    "M:TabTabGo.Storage.Entities.File.set_FormFile(Microsoft.AspNetCore.Http.IFormFile)": ("SB4", "File.FormFile removed; upload content is a FileUpload (ADR 0004)"),
+    "M:TabTabGo.Storage.Entities.IFile.get_FormFile": ("SB4", "IFile.FormFile removed; upload content is a FileUpload (ADR 0004)"),
+    "M:TabTabGo.Storage.Entities.IFile.set_FormFile(Microsoft.AspNetCore.Http.IFormFile)": ("SB4", "IFile.FormFile removed; upload content is a FileUpload (ADR 0004)"),
+    "M:TabTabGo.Storage.Services.IFileService`1.ListAsync(TabTabGo.Storage.Models.FileListQuery,System.Linq.Expressions.Expression{System.Func{`0,System.Boolean}},System.Threading.CancellationToken)":
+        ("SB22", "IFileService<TFile>.ListAsync added (interface member; implementers must add it)"),
+    "M:TabTabGo.Storage.Services.IFileService`1.Replace(System.Int64,TabTabGo.Storage.Models.FileUpload,System.Threading.CancellationToken)":
+        ("SB22", "IFileService<TFile>.Replace added (interface member; implementers must add it)"),
+    "M:TabTabGo.Storage.Services.IFileService`1.Upload(`0,TabTabGo.Storage.Models.FileUpload,System.Threading.CancellationToken)":
+        ("SB22", "IFileService<TFile>.Upload added (interface member; implementers must add it)"),
+}
+
+# SHA-256 of the published 6.0.8.4 packages, so a tampered download or cache cannot change the baseline.
+BASELINE_SHA256 = {
+    "TabTabGo.Storage": "6d68c0e4155e51f2dce5082c29dc47573c46be556fa49e8e61d3a9b6323b21ad",
+    "TabTabGo.Storage.Services": "73302b34d227beb4104b60402212eb651bbd198ea0f5ab8edf545a639645aff2",
+    "TabTabGo.Storage.Data.EF": "9ab2108dfacdc375811464f747ab6c276009759c546e511c7e9797a6700bcec5",
+    "TabTabGo.Storage.Aws": "81d745490ddfaa9e79f08edef51fba5be316355fdcd24d16c04fd1d5b4baa80f",
+    "TabTabGo.Storage.Azure": "7ebc34b12e0325360ed56d90dbaae059476f231327a8323d8f6ae50a72b30b6a",
+    "TabTabGo.Storage.FileStorage": "0da22249cf854d43846cbfa2add1bff0bd1e9e71fd52bdd3a1c3fbb901418c3e",
+}
 
 
 def tool(*args):
@@ -68,14 +78,23 @@ def tool(*args):
                           capture_output=True)
 
 
+def sha256(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def fetch(package: str) -> pathlib.Path:
     dest = CACHE / package
     marker = dest / ".done"
+    nupkg = CACHE / f"{package}.{BASELINE}.nupkg"
+    expected = BASELINE_SHA256[package]
+    if marker.exists() and (not nupkg.exists() or sha256(nupkg) != expected):
+        sys.exit(f"{nupkg} does not match the pinned SHA-256; delete artifacts/apicompat-baseline and rerun")
     if not marker.exists():
         dest.mkdir(parents=True, exist_ok=True)
         url = f"https://api.nuget.org/v3-flatcontainer/{package.lower()}/{BASELINE}/{package.lower()}.{BASELINE}.nupkg"
-        nupkg = CACHE / f"{package}.{BASELINE}.nupkg"
         urllib.request.urlretrieve(url, nupkg)
+        if sha256(nupkg) != expected:
+            sys.exit(f"{package} {BASELINE}: downloaded package does not match the pinned SHA-256 {expected}")
         with zipfile.ZipFile(nupkg) as z:
             z.extractall(dest)
         for f in dest.rglob("*"):
@@ -98,10 +117,7 @@ def annotate(raw: str, package: str):
     unmapped = []
 
     def rule_for(target: str):
-        for needle, row, reason in RULES:
-            if needle in target:
-                return row, reason
-        return None
+        return EXACT.get(target)
 
     def repl(match):
         block = match.group(0)

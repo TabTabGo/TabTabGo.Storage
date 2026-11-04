@@ -126,5 +126,7 @@ jobs:
           esac
           echo "scanning ${range}"
           ./gitleaks git . --no-banner --redact --exit-code 1 --log-opts="$range"
-          # TODO(owner, after the keys are rotated): add a .gitleaksignore with the historical fingerprints only if a
-          # range scan ever needs to cross them. Do not add it before rotation is confirmed.
+          # NOTE: rotation of the credentials that are still readable in public history (the Azure storage key and the
+          # NuGet API keys) is NOT confirmed. Until it is, those leaks stay real and there is deliberately no .gitleaksignore.
+          # TODO(owner): once rotation is confirmed, add a .gitleaksignore with the historical fingerprints only if a range
+          # scan ever has to cross them.

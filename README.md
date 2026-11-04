@@ -109,6 +109,10 @@ Every provider passes the same contract suite:
 | A container is exactly one path segment on every provider (`a/b` and `../x` are 400) | use single-segment container names |
 | Updates run `IsValidToUpdate` on the stored row merged with the allow-listed client changes; `UpdateChanges` routes through the same allow-list | review any `IsValidToUpdate` override that read client-only fields |
 | `FileType` must be a defined value (400 otherwise); `Unknown` on an update means "unchanged" | none |
+| Container names are lower-cased with the invariant culture (6.x used the current culture: under tr-TR `Image` became `mage`) | a 6.x host that ran under a Turkish or Azerbaijani culture may have data in `mage`; copy it to `image` |
+| Soft-deleted files are hidden from the inherited Core reads too; `Purge` is gated by `IsValidToPurge` and `PreDelete(file)` | none |
+| Bulk deletes (`Delete(ids)`, `Delete(query)`, `Purge(ids)`) now also call the single-entity `PreDelete(file)` / `PostDelete(file)` | hosts that count hook calls |
+| `Upload`: `ExtraProperties` of the metadata are cleared unless `AllowMetadataExtraProperties` is set; `IsCompressed` is `false` | set the option if you rely on metadata extras |
 | `StorageServiceOptions.MaxFileSizeBytes` defaults to 50 MiB and `ImageServiceOptions.MaxPixels` to 25 000 000 | raise them explicitly if you accept larger files |
 | GIF/BMP/ICO thumbnails are PNG; JPEG quality 90 | none |
 | `Delete(id)` / `Delete(ids)` are still **soft deletes** (`IsEnabled = false`, objects kept); a soft-deleted file is now hidden from every read and mutation by id | none. New: `FileService<TFile>.Purge(id)` / `Purge(ids)` hard-delete the row and remove the objects (class only, not on `IFileService`); `Delete(query)` stays a hard delete as in 6.x |
@@ -132,7 +136,9 @@ dotnet restore TabTabGo.Storage.sln --configfile nuget.local.config
 dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
 ```
 
-The local packages live in `tabtabgo/.local-nuget` (never committed); the Core worktree is not touched. Never publish
+The local packages live in `tabtabgo/.local-nuget` (never committed); the Core worktree is not touched.
+**Unset the variable when you are done** (`unset TabTabGoCoreVersion`): a leftover `export` keeps every build on the
+local Core even after 8.0.1 is published on nuget.org. Never publish
 with the variable set: `release.yml` refuses it. Emulator tests (LocalStack 4.0, Azurite) need Docker and skip
 themselves without it; set `TTG_SKIP_EMULATORS=true` to skip them explicitly.
 
@@ -146,6 +152,18 @@ equals the target framework major, whose commit is on `releases/vMAJOR.MINOR.x/*
 manual approval in the `nuget-release` environment; the repository variable `RELEASE_APPROVAL_MODE=environment`
 must be set or the workflow refuses to publish. Publishing uses nuget.org trusted publishing (`NUGET_USER`) with an
 environment-scoped API key as the only fallback. CI (`ci.yml`) never publishes.
+
+## Accepted limits
+
+- The symlink check of the file-system provider resolves links and then uses the path (check-then-use): a link swapped in
+  between the check and the open by someone who can write inside the storage root is not prevented. Keep the root writable
+  only by the application.
+- Two concurrent requests for the same missing thumbnail may both generate and store it (identical bytes, last write wins).
+- Thumbnail keys written by 6.x with a backslash separator cannot be addressed through `StoragePath`, so `Delete(query)` and
+  `Purge` do not remove them.
+- Azure containers must never be derived from user input: a container name is configuration, not a request field.
+- A 6.x host that ran under a Turkish or Azerbaijani culture may hold data in a container named `mage` (6.x lower-cased
+  `Image` with the dotless i); v8 lower-cases invariantly, so that data is not found under `image` and has to be copied.
 
 ## License
 

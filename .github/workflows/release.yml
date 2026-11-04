@@ -225,6 +225,30 @@ jobs:
             unzip -l "$file" | grep -q "README.md" || { echo "::error::$file has no README"; exit 1; }
           done
 
+      - name: Verify the RESOLVED Core dependency of every package
+        env:
+          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # The default range as written in Directory.Packages.props; what was actually packed must be exactly that,
+          # so a value injected through Directory.Build.props, a .rsp file or the environment cannot slip through.
+          core_range="$(grep -oE '<TabTabGoCoreVersion[^>]*>[^<]+' Directory.Packages.props | head -1 | sed 's/.*>//')"
+          if [ "$PRERELEASE" = "false" ] && ! [[ "$core_range" =~ ^\[[0-9]+\.[0-9]+\.[0-9]+,\ [0-9]+\.[0-9]+\.[0-9]+\)$ ]]; then
+            echo "::error::a stable tag needs a stable bounded Core range, found '$core_range'"; exit 1
+          fi
+          found=0
+          for file in out/*.nupkg; do
+            nuspec="$(unzip -p "$file" '*.nuspec')"
+            while IFS= read -r version; do
+              [ -n "$version" ] || continue
+              found=$((found + 1))
+              if [ "$version" != "$core_range" ]; then
+                echo "::error::$file depends on a Core package at '$version', expected exactly '$core_range'"; exit 1
+              fi
+            done < <(printf '%s' "$nuspec" | grep -oE '<dependency id="(TabTabGo\.Core[A-Za-z.]*|TabTabGo\.Data\.EF)" version="[^"]+"' | sed -E 's/.*version="([^"]+)"/\1/')
+          done
+          [ "$found" -gt 0 ] || { echo "::error::no Core dependency found in any package"; exit 1; }
+
       - name: Upload packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
