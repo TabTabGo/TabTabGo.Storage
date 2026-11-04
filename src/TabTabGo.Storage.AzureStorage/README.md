@@ -22,8 +22,14 @@ Options are validated at startup: a connection string, or `ServiceUri` together 
   SAS; with a token credential it is a **user-delegation** SAS. If neither is possible it returns `null`.
   Content type and disposition overrides follow the same rule as S3: the type of the object's own extension, and
   `attachment` unless the type is safe to render and `Inline` was requested.
-- `LowercaseBlobNames` (default `true`) keeps compatibility with existing lower-case blobs; `A.png` and `a.png`
-  collide while it is on. Turn it off for new, case-preserving deployments.
+- `LowercaseBlobNames` (default `true`) keeps compatibility with existing lower-case blobs, so **`A.png` and `a.png`
+  are the same blob** (S3 and the file system are case-sensitive). `FileService` names are GUID paths and cannot collide;
+  callers that choose their own paths must not rely on case. Turn it off for new, case-preserving deployments.
+- Container names: unsafe input (`../x`, `a/b`, control characters) is a 400; a safe name maps exactly as 6.x did
+  (`my_files` -> `myfiles`); only names Azure used to reject (`a--b`, fewer than 3 characters) are adjusted.
 - Overwrite is the default; `StorageWriteOptions.Overwrite = false` uses an `If-None-Match: *` condition.
-- Dependency note: `Azure.Core` 1.60 requires `Microsoft.Extensions.*` 10.0.x, so this package references those at 10.0.9.
+- Dependency note: the v8 line pins `Azure.Storage.Blobs` 12.27.0 because 12.28+ forces `Microsoft.Extensions.*` and
+  `System.Text.Json` 10.x onto net8.0; the v10 line uses 12.30.1.
+- A SAS URL is served by Azure without our headers (no `nosniff`), so the response type is always the object's own
+  extension type and `text/plain` is never inline.
 - Tests: mock `BlobServiceClient`/`BlobClient` (they are mockable), or run Azurite through Testcontainers.

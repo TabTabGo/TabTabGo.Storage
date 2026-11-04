@@ -22,5 +22,8 @@ Every `AWSSDK.*` package in your application must be on 4.x (one `AWSSDK.Core` m
 - `GetPublicUrlAsync` returns a presigned GET URL (1 minute to 7 days). A `ContentType` / `DownloadFileName`
   override becomes a response header override; the content type is always the one of the object's own extension and
   the disposition is `attachment` unless the type is safe to render and `Inline` was requested.
+- `StoreAsync` with `Overwrite = false` is a single conditional PUT (`If-None-Match: *`), so concurrent writers cannot both win.
+- A presigned URL is served by S3 without our headers (no `X-Content-Type-Options: nosniff`): the response type is always
+  the type of the object's own extension and `text/plain` is never inline.
 - A forward-only stream for large objects: `OpenReadAsync`.
 - Tests: `S3StorageProvider` takes an `IAmazonS3`, so mock it, or run LocalStack through Testcontainers.

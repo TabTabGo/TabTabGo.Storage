@@ -78,6 +78,9 @@ Every provider passes the same contract suite:
   own extension (the caller's string is never echoed).
 - **Updates cannot move files.** `FilePath`, `FileSize`, `FileExtension`, `OriginalFileName` and
   `OriginalMediaType` change only through `Upload` / `Replace`.
+- **Signed URLs are served by the storage provider, without our headers** (no `X-Content-Type-Options: nosniff`). They
+  therefore only ever carry the content type of the object's own extension, `text/plain` is never inline, and active
+  content is always an attachment.
 - **Credentials:** use an IAM role (S3) or managed identity (Azure). Presigned URLs and SAS live between 1 minute
   and 7 days.
 - Thumbnail generation rejects images over `ImageServiceOptions.MaxPixels` (decompression-bomb guard).
@@ -99,8 +102,16 @@ Every provider passes the same contract suite:
 | `FileResult` fields are properties and `FileResult` is `IAsyncDisposable` | recompile; dispose it |
 | `ImageSizeExtensions` is in `TabTabGo.Storage.Services` | add the `using` |
 | `FileNotFoundException` / `TTGException` become `ApiException` (404/400) | update exception filters |
+| `FileService.Update(long, JObject)` (Newtonsoft) became `Update(long, JsonObject)` (System.Text.Json), Core 8 API | switch the argument type |
+| `IPathService.PathSettings { get; }` is a new abstract member | custom `IPathService` implementers must add it |
+| `FileService.PostCreate` / `GetImage` signatures changed (`CancellationToken`, nullable, `FileResult` is `IAsyncDisposable`) | recompile overrides and dispose the result |
+| `StorageDbContext.OnConfiguring` is no longer overridden | none unless you derived from it and relied on the override |
+| A container is exactly one path segment on every provider (`a/b` and `../x` are 400) | use single-segment container names |
+| Updates run `IsValidToUpdate` on the stored row merged with the allow-listed client changes; `UpdateChanges` routes through the same allow-list | review any `IsValidToUpdate` override that read client-only fields |
+| `FileType` must be a defined value (400 otherwise); `Unknown` on an update means "unchanged" | none |
+| `StorageServiceOptions.MaxFileSizeBytes` defaults to 50 MiB and `ImageServiceOptions.MaxPixels` to 25 000 000 | raise them explicitly if you accept larger files |
 | GIF/BMP/ICO thumbnails are PNG; JPEG quality 90 | none |
-| `Delete(id)` / `Delete(ids)` remove the row (hard delete, like `Delete(query)`) and then the stored objects | previously a soft delete of the row |
+| `Delete(id)` / `Delete(ids)` are still **soft deletes** (`IsEnabled = false`, objects kept); a soft-deleted file is now hidden from every read and mutation by id | none. New: `FileService<TFile>.Purge(id)` / `Purge(ids)` hard-delete the row and remove the objects (class only, not on `IFileService`); `Delete(query)` stays a hard delete as in 6.x |
 | `StorageDbContext` maps `File` | only matters if you generated migrations from it |
 | `TabTabGo.Storage.WebApi` (never published) | removed; a minimal-API read package is planned |
 
@@ -112,10 +123,22 @@ dotnet build -c Release -warnaserror
 dotnet test -c Release
 ```
 
-`global.json` pins the SDK. While `TabTabGo.Core` 8.0.1 is not on nuget.org, pack it to a local feed
-(`python3 ../scripts/pack-core-local.py`) and restore with a git-ignored `nuget.local.config`
-(`dotnet restore --configfile nuget.local.config`). Emulator tests (LocalStack, Azurite) need Docker and skip
+`global.json` pins the SDK. While `TabTabGo.Core` 8.0.1 is not on nuget.org, build against a local Core:
+
+```bash
+python3 scripts/local-core.py                       # packs Core v8 as 8.0.1-local.<sha> and writes nuget.local.config (git-ignored)
+export TabTabGoCoreVersion=8.0.1-local.<sha>        # printed by the script; overrides the [8.0.1, 9.0.0) range
+dotnet restore TabTabGo.Storage.sln --configfile nuget.local.config
+dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
+```
+
+The local packages live in `tabtabgo/.local-nuget` (never committed); the Core worktree is not touched. Never publish
+with the variable set: `release.yml` refuses it. Emulator tests (LocalStack 4.0, Azurite) need Docker and skip
 themselves without it; set `TTG_SKIP_EMULATORS=true` to skip them explicitly.
+
+API compatibility against the published 6.0.8.4 libraries is checked by `python3 scripts/apicompat.py` (every
+suppression in `compat/` cites its spec 6.4 row); `python3 scripts/mutation-check.py` re-introduces the registered bugs
+and proves a test kills each one; `Golden/capture/capture.py` re-captures the EF model golden files from the 6.0.8.4 sources.
 
 **Releasing.** `.github/workflows/release.yml` publishes only from a tag `vMAJOR.MINOR.PATCH[-rc.N]` whose major
 equals the target framework major, whose commit is on `releases/vMAJOR.MINOR.x/*`, whose version equals
