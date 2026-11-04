@@ -1,46 +1,20 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
-    <Version>$(VersionSuffix)</Version>
-    <Product>TabTabGo Storage Data entity framewok</Product>
-    <Copyright>Copyright 2023</Copyright>
-    <PackageTags>Core</PackageTags>
-    <PackageReleaseNotes></PackageReleaseNotes>
-    <Company>TabTabGo</Company>
-    <Authors>TabTabGo</Authors>
-    <Description>Storage WebApi for TabTabGo</Description>
+    <Title>TabTabGo Storage Data EF</Title>
+    <Product>TabTabGo Storage Data EF</Product>
+    <Description>Entity Framework Core model builder and unit of work for TabTabGo Storage. Ships no migrations.</Description>
+    <PackageTags>Storage;EntityFramework;TabTabGo</PackageTags>
     <RootNamespace>TabTabGo.Storage.Data.EF</RootNamespace>
-    <Nullable>enable</Nullable>
-    <PackageProjectUrl>https://github.com/TabTabGo/TabTabGo.Storage</PackageProjectUrl>
-    <PackageIcon>logo@32.png</PackageIcon>
-    <RepositoryUrl>https://github.com/TabTabGo/TabTabGo.Storage</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="LinqKit.Microsoft.EntityFrameworkCore" Version="6.1.2" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="6.0.9" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="6.0.9">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="6.0.4">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="TabTabGo.Data.EF" Version="6.0.6.2" />
+    <PackageReference Include="TabTabGo.Data.EF" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="..\..\assets\logo@32.png">
-      <Pack>True</Pack>
-      <PackagePath></PackagePath>
-      <Link>logo@32.png</Link>
-    </None>
   </ItemGroup>
 
 </Project>

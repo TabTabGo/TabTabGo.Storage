@@ -1,130 +1,189 @@
-﻿using SkiaSharp;
-using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.IO;
-using System.Text;
+﻿using System.Drawing;
+using System.Net;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using SkiaSharp;
 using TabTabGo.Core.Exceptions;
-using TabTabGo.Storage.Services;
-using TabTabGo.Core;
 
 namespace TabTabGo.Storage.Services;
 
+/// <summary>
+/// SkiaSharp implementation of <see cref="IImageService"/>. Reads the header first and refuses images over the pixel
+/// budget before decoding, applies EXIF orientation, and encodes JPEG/PNG/WEBP (GIF/BMP/ICO sources become PNG).
+/// </summary>
 public class ImageService : IImageService
 {
-    //private readonly Dictionary<ImageSize, Size> _sizePresets;
-    private readonly Dictionary<string, SKEncodedImageFormat> _outputImageFormats;
+    private readonly ImageServiceOptions _options;
 
+    /// <summary>Creates the service with default options.</summary>
     public ImageService()
+        : this(null)
     {
-        _outputImageFormats = new Dictionary<string, SKEncodedImageFormat>
-        {
-            { "bpm", SKEncodedImageFormat.Bmp },
-            { "gif", SKEncodedImageFormat.Gif },
-            { "ico", SKEncodedImageFormat.Ico },
-            { "jpeg", SKEncodedImageFormat.Jpeg },
-            { "jpg", SKEncodedImageFormat.Jpeg },
-            { "png", SKEncodedImageFormat.Png }
-        };
     }
 
-    //public Dictionary<ImageSize, Size> SizePresets => _sizePresets;
+    /// <summary>Creates the service.</summary>
+    /// <param name="options">Image options; defaults are used when <c>null</c>.</param>
+    public ImageService(IOptions<ImageServiceOptions>? options)
+    {
+        _options = options?.Value ?? new ImageServiceOptions();
+    }
 
+    /// <inheritdoc />
     public void Resize(string inputPath, Size outputSize, string outputPath, string outputFormat, bool cropSquare,
         Rectangle? squareFrame)
     {
-        using FileStream inputStream = File.OpenRead(inputPath);
+        using var inputStream = File.OpenRead(inputPath);
         Resize(inputStream, outputSize, outputPath, outputFormat, cropSquare, squareFrame);
     }
 
+    /// <inheritdoc />
     public void Resize(Stream inputStream, Size outputSize, string outputPath, string outputFormat, bool cropSquare,
         Rectangle? squareFrame)
     {
-        if (outputFormat.StartsWith("."))
-            outputFormat = outputFormat.Substring(1);
-        if (string.IsNullOrEmpty(outputFormat) || !_outputImageFormats.ContainsKey(outputFormat.ToLower()))
-            throw new TTGException($"Image format {outputFormat} is not supported", code: "IMAGE_FORMAT_NOT_SUPPORTED");
+        // Validate before touching the disk so a rejected image never leaves a file behind.
+        EnsureSupported(outputFormat);
 
-        using (var output = File.OpenWrite(outputPath))
+        // FileMode.Create truncates; OpenWrite would leave trailing bytes when overwriting a larger file.
+        using (var output = new FileStream(outputPath, FileMode.Create, FileAccess.Write))
         {
             Resize(inputStream, outputSize, output, outputFormat, cropSquare, squareFrame);
         }
 
         if (!File.Exists(outputPath))
-            throw new TTGException(
-                $"Image resize failed. width: {outputSize.Width} height: {outputSize.Height} outputPath {outputPath}",
-                code: "IMAGE_RESIZE_FAILED");
+        {
+            throw Error(HttpStatusCode.InternalServerError, "IMAGE_RESIZE_FAILED",
+                $"Image resize failed. width: {outputSize.Width} height: {outputSize.Height}");
+        }
     }
 
+    /// <inheritdoc />
     public void Resize(Stream inputStream, Size outputSize, Stream outputStream, string outputFormat, bool cropSquare,
         Rectangle? squareFrame)
     {
-        if (outputFormat.StartsWith("."))
-            outputFormat = outputFormat.Substring(1);
-        if (string.IsNullOrEmpty(outputFormat) || !_outputImageFormats.ContainsKey(outputFormat.ToLower()))
-            throw new TTGException($"Image format {outputFormat} is not supported", code: "IMAGE_FORMAT_NOT_SUPPORTED");
+        ArgumentNullException.ThrowIfNull(inputStream);
+        ArgumentNullException.ThrowIfNull(outputStream);
+        var format = EnsureSupported(outputFormat);
 
-        SKEncodedImageFormat sKEncodedImageFormat = _outputImageFormats[outputFormat.ToLower()];
-
-        int Quality = 100;
-
-        using var managedStream = new SKManagedStream(inputStream);
-        using var original = SKBitmap.Decode(managedStream);
-        if (!cropSquare)
+        var source = inputStream;
+        MemoryStream? copy = null;
+        try
         {
-            // resize the original image as is
-            using var resized = original.Resize(new SKImageInfo(outputSize.Width, outputSize.Height),
-                SKBitmapResizeMethod.Lanczos3);
-            if (resized == null)
-                throw new TTGException(
-                    $"Image resize failed. width: {outputSize.Width} height: {outputSize.Height}",
-                    code: "IMAGE_RESIZE_FAILED");
+            if (!inputStream.CanSeek)
+            {
+                copy = new MemoryStream();
+                inputStream.CopyTo(copy);
+                copy.Position = 0;
+                source = copy;
+            }
+
+            using var codec = SKCodec.Create(source)
+                ?? throw Error(HttpStatusCode.BadRequest, "IMAGE_NOT_DECODABLE", "The file is not a readable image.");
+
+            var info = codec.Info;
+            if ((long)info.Width * info.Height > _options.MaxPixels)
+            {
+                throw Error(HttpStatusCode.BadRequest, "IMAGE_TOO_LARGE",
+                    $"The image is {info.Width} x {info.Height} pixels; the limit is {_options.MaxPixels} pixels.");
+            }
+
+            using var decoded = SKBitmap.Decode(codec)
+                ?? throw Error(HttpStatusCode.BadRequest, "IMAGE_NOT_DECODABLE", "The file is not a readable image.");
+            using var oriented = ApplyOrigin(decoded, codec.EncodedOrigin);
+            var upright = oriented ?? decoded;
+
+            using var cropped = cropSquare ? Crop(upright, squareFrame) : null;
+            var toResize = cropped ?? upright;
+
+            using var resized = toResize.Resize(new SKImageInfo(outputSize.Width, outputSize.Height),
+                new SKSamplingOptions(SKCubicResampler.Mitchell))
+                ?? throw Error(HttpStatusCode.InternalServerError, "IMAGE_RESIZE_FAILED",
+                    $"Image resize failed. width: {outputSize.Width} height: {outputSize.Height}");
 
             using var image = SKImage.FromBitmap(resized);
-            image.Encode(sKEncodedImageFormat, Quality)
-                .SaveTo(outputStream);
+            using var data = image.Encode(format, Math.Clamp(_options.JpegQuality, 1, 100))
+                ?? throw Error(HttpStatusCode.InternalServerError, "IMAGE_RESIZE_FAILED", "Image encoding failed.");
+            data.SaveTo(outputStream);
+        }
+        finally
+        {
+            copy?.Dispose();
+        }
+    }
+
+    private static SKEncodedImageFormat EnsureSupported(string outputFormat)
+    {
+        if (string.IsNullOrWhiteSpace(outputFormat) || !ImageFormats.TryGetEncoder(outputFormat, out var format))
+        {
+            throw Error(HttpStatusCode.BadRequest, "IMAGE_FORMAT_NOT_SUPPORTED",
+                $"Image format {outputFormat} is not supported");
+        }
+
+        return format;
+    }
+
+    // Returns a new bitmap when a transform is needed, otherwise null (the caller keeps using the original).
+    private static SKBitmap? ApplyOrigin(SKBitmap source, SKEncodedOrigin origin)
+    {
+        if (origin is SKEncodedOrigin.TopLeft or SKEncodedOrigin.Default)
+        {
+            return null;
+        }
+
+        var w = source.Width;
+        var h = source.Height;
+        var swap = origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop or SKEncodedOrigin.RightBottom
+            or SKEncodedOrigin.LeftBottom;
+        var target = new SKBitmap(swap ? h : w, swap ? w : h);
+        using var canvas = new SKCanvas(target);
+        var matrix = origin switch
+        {
+            SKEncodedOrigin.TopRight => new SKMatrix(-1, 0, w, 0, 1, 0, 0, 0, 1),
+            SKEncodedOrigin.BottomRight => new SKMatrix(-1, 0, w, 0, -1, h, 0, 0, 1),
+            SKEncodedOrigin.BottomLeft => new SKMatrix(1, 0, 0, 0, -1, h, 0, 0, 1),
+            SKEncodedOrigin.LeftTop => new SKMatrix(0, 1, 0, 1, 0, 0, 0, 0, 1),
+            SKEncodedOrigin.RightTop => new SKMatrix(0, -1, h, 1, 0, 0, 0, 0, 1),
+            SKEncodedOrigin.RightBottom => new SKMatrix(0, -1, h, -1, 0, w, 0, 0, 1),
+            SKEncodedOrigin.LeftBottom => new SKMatrix(0, 1, 0, -1, 0, w, 0, 0, 1),
+            _ => SKMatrix.Identity,
+        };
+        canvas.Concat(in matrix);
+        canvas.DrawBitmap(source, 0, 0);
+        return target;
+    }
+
+    private static SKBitmap Crop(SKBitmap source, Rectangle? frame)
+    {
+        SKRectI rect;
+        if (frame is { } f)
+        {
+            rect = new SKRectI(f.X, f.Y, f.Right, f.Bottom);
+            if (f.Width <= 0 || f.Height <= 0 || rect.Left < 0 || rect.Top < 0 || rect.Right > source.Width ||
+                rect.Bottom > source.Height)
+            {
+                throw Error(HttpStatusCode.BadRequest, "IMAGE_CROP_FRAME_INVALID",
+                    "The crop frame is outside the image.");
+            }
         }
         else
         {
-            bool ScaleX = original.Width >= original.Height ? true : false;
-            SKBitmap squareBitmap = null;
-            if (squareFrame != null)
-            {
-                //use the user provided frame to crop the square bitmap
-                squareBitmap = new SKBitmap(squareFrame.Value.Width, squareFrame.Value.Height);
-                original.ExtractSubset(squareBitmap, new SKRectI(
-                    squareFrame.Value.X,
-                    squareFrame.Value.Y,
-                    squareFrame.Value.Right,
-                    squareFrame.Value.Bottom));
-            }
-            else
-            {
-                //take the largest possible square from the center of the image, crop-off excess height/ width
-                int diff = Math.Abs(original.Width - original.Height);
-                int cropSize = diff / 2;
-                int squareWidthHeight = ScaleX ? original.Width - diff : original.Height - diff;
-
-                squareBitmap = new SKBitmap(squareWidthHeight, squareWidthHeight);
-
-                if (ScaleX)
-                    original.ExtractSubset(squareBitmap,
-                        new SKRectI(cropSize, 0, original.Width - cropSize, original.Height));
-                else
-                    original.ExtractSubset(squareBitmap,
-                        new SKRectI(0, cropSize, original.Width, original.Height - cropSize));
-            }
-
-            using var resized = squareBitmap.Resize(new SKImageInfo(outputSize.Width, outputSize.Height),
-                SKBitmapResizeMethod.Lanczos3);
-            if (resized == null)
-                throw new TTGException(
-                    $"Image resize failed. width: {outputSize.Width} height: {outputSize.Height}",
-                    code: "IMAGE_RESIZE_FAILED");
-
-            using var image = SKImage.FromBitmap(resized);
-            image.Encode(sKEncodedImageFormat, Quality)
-                .SaveTo(outputStream);
+            // Largest centred square; with an odd difference the extra pixel falls on the far edge.
+            var side = Math.Min(source.Width, source.Height);
+            var left = (source.Width - side) / 2;
+            var top = (source.Height - side) / 2;
+            rect = new SKRectI(left, top, left + side, top + side);
         }
+
+        var cropped = new SKBitmap();
+        if (!source.ExtractSubset(cropped, rect))
+        {
+            cropped.Dispose();
+            throw Error(HttpStatusCode.BadRequest, "IMAGE_CROP_FRAME_INVALID", "The crop frame is outside the image.");
+        }
+
+        return cropped;
     }
+
+    private static ApiException Error(HttpStatusCode status, string code, string message) =>
+        new(message, null, status >= HttpStatusCode.InternalServerError ? LogLevel.Error : LogLevel.Warning, null,
+            status, code);
 }

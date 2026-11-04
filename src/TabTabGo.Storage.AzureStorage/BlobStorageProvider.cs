@@ -1,179 +1,310 @@
-﻿using System;
-using System.IO;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-
+﻿using System.Collections.Concurrent;
+using System.Net;
+using Azure;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Blobs.Specialized;
 using Azure.Storage.Sas;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using TabTabGo.Storage.ContentTypes;
+using TabTabGo.Storage.Exceptions;
+using TabTabGo.Storage.Models;
 
 namespace TabTabGo.Storage.AzureStorage;
 
+/// <summary>
+/// Azure Blob Storage implementation of <see cref="IStorageProvider"/>. A container maps to a blob container
+/// (name normalised per Azure rules). The injected <see cref="BlobServiceClient"/> is shared; containers are created
+/// only on write, once per process.
+/// </summary>
 public class BlobStorageProvider : StorageProvider
 {
-    private readonly IConfiguration _configuration;
+    private const string ProviderName = "AzureBlob";
+
+    private readonly BlobServiceClient _serviceClient;
+    private readonly AzureBlobStorageOptions _options;
     private readonly ILogger<BlobStorageProvider> _logger;
+    private readonly ConcurrentDictionary<string, Task> _createdContainers = new(StringComparer.Ordinal);
+
+    /// <summary>Creates the provider around a shared client.</summary>
+    /// <param name="serviceClient">Shared blob service client.</param>
+    /// <param name="options">Provider options.</param>
+    /// <param name="logger">Logger. SAS URLs and keys are never logged.</param>
+    public BlobStorageProvider(BlobServiceClient serviceClient, IOptions<AzureBlobStorageOptions> options,
+        ILogger<BlobStorageProvider> logger)
+    {
+        _serviceClient = serviceClient ?? throw new ArgumentNullException(nameof(serviceClient));
+        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>Legacy constructor: reads <c>ConnectionStrings:AzureStorageConnection</c> and builds its own client.</summary>
+    /// <param name="configuration">Application configuration.</param>
+    /// <param name="logger">Logger.</param>
+    [Obsolete("Use AddTabTabGoAzureBlobStorage() or the (BlobServiceClient, IOptions<AzureBlobStorageOptions>, ILogger) constructor.")]
     public BlobStorageProvider(IConfiguration configuration, ILogger<BlobStorageProvider> logger)
     {
-        _configuration = configuration;
-        _logger = logger;
+        ArgumentNullException.ThrowIfNull(configuration);
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _options = new AzureBlobStorageOptions
+        {
+            ConnectionString = configuration.GetConnectionString(AzureBlobStorageOptions.LegacyConnectionStringName),
+        };
+        _serviceClient = AzureBlobClientFactory.Create(_options);
     }
 
-    public override async Task<string> StoreAsync(byte[] buffer, string extension = ".tmp",
-        string container = "unknown")
+    /// <inheritdoc />
+    public override string GetRootDirectory(string container = "unknown") => string.Empty;
+
+    /// <inheritdoc />
+    public override async Task<string> StoreAsync(byte[] buffer, string extension = ".tmp", string container = "unknown")
     {
-        if (extension.StartsWith("."))
-            extension = extension.Substring(1);
-
-        var fileIdentifier = $"{Guid.NewGuid().ToString()}.{extension}";
-
-        await StoreAsync(fileIdentifier, buffer, container);
-
-        return fileIdentifier;
+        ArgumentNullException.ThrowIfNull(buffer);
+        var ext = (extension ?? string.Empty).TrimStart('.');
+        var name = ext.Length == 0 ? Guid.NewGuid().ToString() : $"{Guid.NewGuid()}.{ext}";
+        return await StoreAsync(name, buffer, container).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     public override async Task<string> StoreAsync(string filePath, byte[] buffer, string container = "unknown")
     {
-        var blockBlob = await GetBlob(filePath, container);
-        _logger.LogTrace("Uploading blob {0} under container {1}", blockBlob.Name, blockBlob.BlobContainerName);
-        using var memoryStream = new MemoryStream();
-        await memoryStream.WriteAsync(buffer, 0, buffer.Length);
-        memoryStream.Seek(0, SeekOrigin.Begin);
-        
-        var response = await blockBlob.UploadAsync(memoryStream);
-         _logger.LogTrace("Blob {0} under container {1} size {2} bytes uploaded with Sequance number: {3} , version no : {4}", blockBlob.Name, container, buffer.Length.ToString() , response.Value.BlobSequenceNumber.ToString(), response.Value.VersionId);
-        return filePath;
+        ArgumentNullException.ThrowIfNull(buffer);
+        using var stream = new MemoryStream(buffer, writable: false);
+        return await StoreAsync(stream, filePath, null, container).ConfigureAwait(false);
     }
 
-    public override string GetRootDirectory(string container = "unknown")
+    /// <inheritdoc />
+    public override async Task<string> StoreAsync(Stream content, string filePath, StorageWriteOptions? options = null,
+        string container = "unknown", CancellationToken ct = default)
     {
-        return string.Empty;
-    }
-
-    public override async Task<Stream> RetrieveAsync(string fileIdentifier, string container = "unknown")
-    {
-        var blockBlob = await GetBlob(fileIdentifier, container);
-        _logger.LogTrace("Retrieving blob {0} under container {1}", blockBlob.Name, blockBlob.BlobContainerName);
-        
-        var memoryStream = new MemoryStream();
-
-        // Download the blob's contents and save it to a file
-        BlobDownloadInfo download = await blockBlob.DownloadAsync();
-        _logger.LogTrace("Blob {0} under container {1} of type {2} and size {3} bytes retrieved", fileIdentifier, container, download.BlobType.ToString(), download.ContentLength.ToString());
-        await download.Content.CopyToAsync(memoryStream);
-
-        memoryStream.Seek(0, SeekOrigin.Begin);
-
-        return memoryStream;
-    }
-
-    public override async Task DeleteAsync(string fileIdentifier, string container = "unknown")
-    {
-        var blockBlob = await GetBlob(fileIdentifier, container);
-        _logger.LogTrace("Deleting blob {0} under container {1}", fileIdentifier, container);
-        if (await blockBlob.ExistsAsync())
+        ArgumentNullException.ThrowIfNull(content);
+        var (containerClient, blob, relative) = GetBlob("Store", container, filePath);
+        try
         {
-            await blockBlob.DeleteAsync();
-            _logger.LogTrace("Blob {0} under container {1} deleted", fileIdentifier, container);
-        }
-        else
-        {
-            _logger.LogWarning("Blob {0} under container {1} not found", fileIdentifier, container);
-        }
-    }
-
-    public override async Task<string> GetPublicPath(string fileIdentifier, string mediaType, string fileName,
-        int expiryDays = 20, string container = "unknown")
-    {
-        var blobClient = await GetBlob(fileIdentifier, container);
-
-        // Check whether this BlobClient object has been authorized with Shared Key.
-        if (blobClient.CanGenerateSasUri)
-        {
-            // Create a SAS token that's valid for one hour.
-            BlobSasBuilder sasBuilder = new BlobSasBuilder
+            await EnsureContainerAsync(containerClient).ConfigureAwait(false);
+            _logger.LogTrace("Uploading blob {BlobName} to container {Container}", blob.Name, containerClient.Name);
+            var upload = new BlobUploadOptions
             {
-                BlobContainerName = blobClient.GetParentBlobContainerClient().Name,
-                BlobName = blobClient.Name,
-                Resource = "b",
-                ExpiresOn = DateTimeOffset.UtcNow.AddHours(1)
+                HttpHeaders = new BlobHttpHeaders
+                {
+                    ContentType = options?.ContentType ?? ContentTypeMap.FromExtension(Path.GetExtension(relative)),
+                },
             };
+            if (options is { Overwrite: false })
+            {
+                upload.Conditions = new BlobRequestConditions { IfNoneMatch = ETag.All };
+            }
 
-            sasBuilder.SetPermissions(BlobSasPermissions.Read);
-
-            Uri sasUri = blobClient.GenerateSasUri(sasBuilder);
-            Console.WriteLine("SAS URI for blob is: {0}", sasUri);
-            Console.WriteLine();
-
-            return sasUri.AbsolutePath;
+            await blob.UploadAsync(content, upload, ct).ConfigureAwait(false);
+            return relative;
         }
-        else
+        catch (RequestFailedException e) when (options is { Overwrite: false } && e.Status is 409 or 412)
         {
-            Console.WriteLine(@"BlobClient must be authorized with Shared Key 
-                          credentials to create a service SAS.");
+            throw new StorageException("Object already exists.", ProviderName, "Store", container, relative,
+                HttpStatusCode.Conflict, e, "STORAGE_OBJECT_EXISTS");
+        }
+        catch (Exception e) when (IsUpstream(e))
+        {
+            throw Failure("Store", container, relative, e);
+        }
+    }
+
+    /// <inheritdoc />
+    public override Task<Stream?> RetrieveAsync(string filePath, string container = "unknown") =>
+        RetrieveAsync(filePath, container, CancellationToken.None);
+
+    /// <inheritdoc />
+    public override async Task<Stream?> RetrieveAsync(string filePath, string container, CancellationToken ct)
+    {
+        var (_, blob, relative) = GetBlob("Retrieve", container, filePath);
+        try
+        {
+            using var download = (await blob.DownloadStreamingAsync(cancellationToken: ct).ConfigureAwait(false)).Value;
+            var memory = new MemoryStream();
+            await download.Content.CopyToAsync(memory, ct).ConfigureAwait(false);
+            memory.Position = 0;
+            return memory;
+        }
+        catch (RequestFailedException e) when (e.Status == 404)
+        {
             return null;
         }
+        catch (Exception e) when (IsUpstream(e))
+        {
+            throw Failure("Retrieve", container, relative, e);
+        }
     }
 
-    private async Task<BlobClient> GetBlob(string fileIdentifier, string containerName)
+    /// <inheritdoc />
+    public override async Task<Stream?> OpenReadAsync(string filePath, string container = "unknown",
+        CancellationToken ct = default)
     {
-        fileIdentifier = fileIdentifier.Replace("\\", "/").ToLower();
-        // Retrieve storage account from connection string.
-        if (_configuration.GetConnectionString("AzureStorageConnection") == null)
+        var (_, blob, relative) = GetBlob("OpenRead", container, filePath);
+        try
         {
-            throw new Exception($"Configuration {"AzureStorageConnection"} is missing from the config file");
+            var download = (await blob.DownloadStreamingAsync(cancellationToken: ct).ConfigureAwait(false)).Value;
+            return download.Content;
         }
-
-        _logger.LogTrace("Initialize Blob service ");
-        // Create a blobServiceClient object which will be used to create a container client
-        var blobServiceClient = new BlobServiceClient(_configuration.GetConnectionString("AzureStorageConnection"));
-        containerName = ConvertToValidDnsName(containerName);
-        // get azure container
-        // Create the container and return a container client object
-        var containerClient = blobServiceClient.GetBlobContainerClient(containerName) ?? await blobServiceClient.CreateBlobContainerAsync(containerName);
-        _logger.LogTrace("Get Blob container {0}", containerName);
-        // Create the container if it doesn't already exist.
-        await containerClient.CreateIfNotExistsAsync();
-        _logger.LogTrace("Successfully create container {1} if nor exist", containerName);
-        // Retrieve reference to a blob
-        return containerClient.GetBlobClient(fileIdentifier);
-        
+        catch (RequestFailedException e) when (e.Status == 404)
+        {
+            return null;
+        }
+        catch (Exception e) when (IsUpstream(e))
+        {
+            throw Failure("OpenRead", container, relative, e);
+        }
     }
-    
-    private static string ConvertToValidDnsName(string input)
+
+    /// <inheritdoc />
+    public override async Task<bool> ExistsAsync(string filePath, string container = "unknown",
+        CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(input))
+        var (_, blob, relative) = GetBlob("Exists", container, filePath);
+        try
         {
-            throw new ArgumentException("input cannot be null or empty");
+            return (await blob.ExistsAsync(ct).ConfigureAwait(false)).Value;
         }
-
-        // trim white spaces, convert to lowercase
-        input = input.Trim().ToLower();
-
-        // replace spaces with hyphens
-        input = input.Replace(" ", "-");
-
-        // remove invalid characters
-        input = Regex.Replace(input, @"[^a-z0-9\-]", "");
-
-        // truncate if necessary to meet DNS max length requirement
-        if (input.Length > 63)
+        catch (Exception e) when (IsUpstream(e))
         {
-            input = input.Substring(0, 63);
+            throw Failure("Exists", container, relative, e);
         }
-
-        // ensure the name doesn't start or end with a hyphen
-        input = input.Trim('-');
-
-        if (input.Length < 1)
-        {
-            throw new ArgumentException("Resulting string is empty");
-        }
-
-        return input;
     }
 
+    /// <inheritdoc />
+    public override Task DeleteAsync(string filePath, string container = "unknown") =>
+        DeleteAsync(filePath, container, CancellationToken.None);
+
+    /// <inheritdoc />
+    public override async Task DeleteAsync(string filePath, string container, CancellationToken ct)
+    {
+        var (_, blob, relative) = GetBlob("Delete", container, filePath);
+        try
+        {
+            await blob.DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots, null, ct).ConfigureAwait(false);
+            _logger.LogTrace("Deleted blob {BlobName} in container {Container}", blob.Name, container);
+        }
+        catch (Exception e) when (IsUpstream(e))
+        {
+            throw Failure("Delete", container, relative, e);
+        }
+    }
+
+    /// <summary>Legacy: returns the absolute SAS URL as a string.</summary>
+    /// <param name="filePath">Relative object path.</param>
+    /// <param name="mediaType">Content type override; ignored when empty.</param>
+    /// <param name="fileName">Download file name; ignored when empty.</param>
+    /// <param name="expiryDays">Ignored; the configured default SAS lifetime applies.</param>
+    /// <param name="container">Container name.</param>
+    /// <returns>The absolute SAS URL, or <c>null</c> when the client cannot sign.</returns>
+    [Obsolete("Use GetPublicUrlAsync")]
+    public override async Task<string?> GetPublicPath(string filePath, string mediaType, string fileName,
+        int expiryDays = 20, string container = "unknown")
+    {
+        var options = new PublicUrlOptions
+        {
+            ContentType = string.IsNullOrWhiteSpace(mediaType) ? null : mediaType,
+            DownloadFileName = string.IsNullOrWhiteSpace(fileName) ? null : fileName,
+        };
+        var uri = await GetPublicUrlAsync(filePath, options, container).ConfigureAwait(false);
+        return uri?.ToString();
+    }
+
+    /// <inheritdoc />
+    public override async Task<Uri?> GetPublicUrlAsync(string filePath, PublicUrlOptions options,
+        string container = "unknown", CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ct.ThrowIfCancellationRequested();
+        var (containerClient, blob, relative) = GetBlob("GetPublicUrl", container, filePath);
+        var expiresOn = DateTimeOffset.UtcNow.Add(options.GetEffectiveExpiry(_options.DefaultSasExpiry));
+        var builder = new BlobSasBuilder
+        {
+            BlobContainerName = containerClient.Name,
+            BlobName = blob.Name,
+            Resource = "b",
+            ExpiresOn = expiresOn,
+            ContentType = options.ContentType,
+            ContentDisposition = options.DownloadFileName is null
+                ? null
+                : ContentDispositionFormatter.Format(options.DownloadFileName, options.Inline),
+        };
+        builder.SetPermissions(BlobSasPermissions.Read);
+
+        try
+        {
+            if (blob.CanGenerateSasUri)
+            {
+                return blob.GenerateSasUri(builder);
+            }
+
+            if (_options.Credential is null)
+            {
+                _logger.LogWarning("Cannot create a SAS URL for blob {BlobName}: configure a shared key or a token credential",
+                    blob.Name);
+                return null;
+            }
+
+            // Token credentials sign with a user-delegation key (no account key needed).
+            var key = await _serviceClient.GetUserDelegationKeyAsync(DateTimeOffset.UtcNow.AddMinutes(-5), expiresOn, ct)
+                .ConfigureAwait(false);
+            return blob.GenerateUserDelegationSasUri(builder, key.Value);
+        }
+        catch (Exception e) when (IsUpstream(e))
+        {
+            throw Failure("GetPublicUrl", container, relative, e);
+        }
+    }
+
+    private static bool IsUpstream(Exception e) =>
+        e is RequestFailedException or HttpRequestException or IOException or TimeoutException or AggregateException;
+
+    private (BlobContainerClient Container, BlobClient Blob, string Relative) GetBlob(string operation, string container,
+        string filePath)
+    {
+        var relative = NormalizePath(ProviderName, operation, container, filePath);
+        string containerName;
+        try
+        {
+            containerName = ContainerNameNormalizer.Normalize(container);
+        }
+        catch (ArgumentException)
+        {
+            throw new StorageException("The storage container is not valid.", ProviderName, operation, container, null,
+                HttpStatusCode.BadRequest, code: "STORAGE_INVALID_CONTAINER");
+        }
+
+        var containerClient = _serviceClient.GetBlobContainerClient(containerName);
+        var blobName = _options.LowercaseBlobNames ? relative.ToLowerInvariant() : relative;
+        return (containerClient, containerClient.GetBlobClient(blobName), relative);
+    }
+
+    private Task EnsureContainerAsync(BlobContainerClient containerClient)
+    {
+        var task = _createdContainers.GetOrAdd(containerClient.Name,
+            _ => containerClient.CreateIfNotExistsAsync(cancellationToken: CancellationToken.None));
+        return AwaitAsync(task, containerClient.Name);
+    }
+
+    private async Task AwaitAsync(Task task, string name)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch
+        {
+            // Do not cache a failed creation: the next write retries.
+            _createdContainers.TryRemove(name, out _);
+            throw;
+        }
+    }
+
+    private StorageException Failure(string operation, string container, string? relative, Exception inner)
+    {
+        _logger.LogError(inner, "Azure Blob {Operation} failed for container {Container}", operation, container);
+        return new StorageException($"Azure Blob {operation} failed.", ProviderName, operation, container, relative,
+            inner: inner);
+    }
 }
