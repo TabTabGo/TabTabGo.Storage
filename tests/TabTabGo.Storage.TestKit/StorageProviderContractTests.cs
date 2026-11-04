@@ -223,6 +223,23 @@ public abstract class StorageProviderContractTests<TProvider> : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, ex.HttpStatusCode);
     }
 
+    // A container is one path segment: traversal, rooted and nested names are rejected (no aliasing a/b+c with a+b/c).
+    [Theory]
+    [InlineData("../x")]
+    [InlineData("a/b")]
+    [InlineData("a\\b")]
+    [InlineData("/rooted")]
+    [InlineData("")]
+    [InlineData("..")]
+    public async Task UnsafeContainer_ThrowsBadRequest_OnEveryOperation(string container)
+    {
+        var store = await Assert.ThrowsAsync<StorageException>(() => Provider.StoreAsync("a.txt", Bytes("x"), container));
+        var retrieve = await Assert.ThrowsAsync<StorageException>(() => Provider.RetrieveAsync("a.txt", container));
+        var delete = await Assert.ThrowsAsync<StorageException>(() => Provider.DeleteAsync("a.txt", container));
+
+        Assert.All(new[] { store, retrieve, delete }, e => Assert.Equal(HttpStatusCode.BadRequest, e.HttpStatusCode));
+    }
+
     [Fact]
     public async Task Containers_AreIsolated()
     {

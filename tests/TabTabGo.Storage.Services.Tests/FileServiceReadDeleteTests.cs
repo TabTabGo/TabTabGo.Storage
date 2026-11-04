@@ -318,26 +318,28 @@ public class FileServiceDeleteTests : IDisposable
 
     public void Dispose() => _h.Dispose();
 
+    // 6.x and Core: Delete(id) is a soft delete and keeps the stored objects.
     [Fact]
-    public async Task DeleteById_RemovesStoredObjects_AndRow()
+    public async Task DeleteById_SoftDeletes_AndKeepsStoredObjects()
     {
         var text = await _h.UploadTextAsync();
 
         await _h.Service.Delete(text.FileId);
 
-        Assert.Equal(0, _h.Storage.Count);
-        Assert.Equal(0, _h.RowCount());
+        Assert.Equal(1, _h.Storage.Count);
+        Assert.Equal(1, _h.RowCount());
+        Assert.False(_h.Reload(text.FileId).IsEnabled);
     }
 
     [Fact]
-    public async Task DeleteById_Image_RemovesThumbnails()
+    public async Task DeleteById_Image_KeepsOriginalAndThumbnails()
     {
         var image = await _h.UploadImageAsync();
-        Assert.Equal(4, _h.Storage.Count);
 
         await _h.Service.Delete(image.FileId);
 
-        Assert.Equal(0, _h.Storage.Count);
+        Assert.Equal(4, _h.Storage.Count);
+        Assert.False(_h.Reload(image.FileId).IsEnabled);
     }
 
     [Fact]
@@ -365,7 +367,7 @@ public class FileServiceDeleteTests : IDisposable
     }
 
     [Fact]
-    public async Task DeleteIds_RemovesOnlyThoseFiles()
+    public async Task DeleteIds_SoftDeletesOnlyThoseFiles_KeepsObjects()
     {
         var a = await _h.UploadTextAsync();
         var b = await _h.UploadTextAsync();
@@ -374,8 +376,10 @@ public class FileServiceDeleteTests : IDisposable
         var deleted = (await _h.Service.Delete([a.FileId, b.FileId], CancellationToken.None)).ToList();
 
         Assert.Equal(2, deleted.Count);
-        Assert.Equal([$"Text/{keep.FilePath}"], _h.Storage.Keys());
-        Assert.Equal(1, _h.RowCount());
+        Assert.Equal(3, _h.Storage.Count);
+        Assert.False(_h.Reload(a.FileId).IsEnabled);
+        Assert.False(_h.Reload(b.FileId).IsEnabled);
+        Assert.True(_h.Reload(keep.FileId).IsEnabled);
     }
 
     [Fact]
@@ -387,6 +391,8 @@ public class FileServiceDeleteTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() => _h.Service.Delete(image.FileId));
         await Assert.ThrowsAsync<InvalidOperationException>(() => _h.Service.Delete([image.FileId], CancellationToken.None));
         await Assert.ThrowsAsync<InvalidOperationException>(() => _h.Service.Delete(f => f.FileId == image.FileId));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _h.Service.Purge(image.FileId));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _h.Service.Purge([image.FileId]));
 
         Assert.Equal(4, _h.Storage.Count);
     }
@@ -395,9 +401,12 @@ public class FileServiceDeleteTests : IDisposable
     public async Task Delete_StorageFailure_IsLoggedNotThrown()
     {
         var file = await _h.UploadTextAsync();
+        var id = file.FileId;
         _h.Storage.FailDeletes = true;
 
-        await _h.Service.Delete(file.FileId);
+        await _h.Service.Delete(f => f.FileId == id);
+        var other = await _h.UploadTextAsync();
+        await _h.Service.Purge(other.FileId);
 
         Assert.Equal(0, _h.RowCount());
     }
@@ -457,6 +466,8 @@ public class FileServiceGateParityTests : IDisposable
         new("Delete(long)", "delete", (h, f) => h.Service.Delete(f.FileId)),
         new("Delete(IEnumerable<long>)", "delete", (h, f) => h.Service.Delete([f.FileId], CancellationToken.None)),
         new("Delete(Expression)", "delete", (h, f) => h.Service.Delete(x => x.FileId == f.FileId)),
+        new("Purge(long)", "delete", (h, f) => h.Service.Purge(f.FileId)),
+        new("Purge(IEnumerable<long>)", "delete", (h, f) => h.Service.Purge([f.FileId])),
         new("Upload(TFile,FileUpload)", "create", (h, f) => h.Service.Upload(FileServiceHarness.Meta(), FileServiceHarness.Text())),
     ];
 
@@ -496,7 +507,7 @@ public class FileServiceGateParityTests : IDisposable
     public void Table_CoversEveryPublicMutatingOverload()
     {
         var mutating = typeof(FileService<File>).GetMethods(BindingFlags.Public | BindingFlags.Instance)
-            .Where(m => m.Name is "Update" or "UpdateChanges" or "Delete" or "Replace" or "Upload" or "Create")
+            .Where(m => m.Name is "Update" or "UpdateChanges" or "Delete" or "Replace" or "Upload" or "Create" or "Purge")
             .Select(Describe)
             .ToHashSet();
 
@@ -560,7 +571,7 @@ public class FileServiceFileStorageEndToEndTests : IDisposable
     {
         var file = await _h.Service.Upload(FileServiceHarness.Meta(FileType.Image), FileServiceHarness.PngUpload());
 
-        await _h.Service.Delete(file.FileId);
+        await _h.Service.Purge(file.FileId);
 
         Assert.Empty(Directory.GetFiles(Path.Combine(_temp.Path, "store"), "*", SearchOption.AllDirectories));
     }

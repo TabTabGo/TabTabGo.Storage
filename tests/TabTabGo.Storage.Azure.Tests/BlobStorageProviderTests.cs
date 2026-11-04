@@ -393,12 +393,25 @@ public class BlobStorageProviderTests
         Assert.Equal(HttpStatusCode.BadRequest, ex.HttpStatusCode);
     }
 
-    [Fact]
-    public async Task Container_TraversalCharacters_AreStrippedNotInterpreted()
+    [Theory]
+    [InlineData("../x")]
+    [InlineData("a/b")]
+    [InlineData("..")]
+    public async Task Container_Traversal_IsRejected_NotSanitised(string container)
     {
-        await Create().StoreAsync("a.txt", [1], "../x");
+        var ex = await Assert.ThrowsAsync<StorageException>(() => Create().StoreAsync("a.txt", [1], container));
 
-        Assert.Contains("x00/a.txt", _azure.Blobs.Keys);
+        Assert.Equal("STORAGE_INVALID_CONTAINER", ex.ErrorCode);
+        Assert.Equal(HttpStatusCode.BadRequest, ex.HttpStatusCode);
+        Assert.Empty(_azure.Blobs);
+    }
+
+    [Fact]
+    public async Task GetPublicUrl_TextPlain_IsAlwaysAnAttachment_EvenWhenInlineIsRequested()
+    {
+        await Create().GetPublicUrlAsync("note.txt", new PublicUrlOptions { Inline = true, DownloadFileName = "note.txt" }, "Text");
+
+        Assert.StartsWith("attachment", Assert.Single(_azure.SasRequests).ContentDisposition);
     }
 
     [Fact]

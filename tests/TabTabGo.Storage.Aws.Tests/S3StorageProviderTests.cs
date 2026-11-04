@@ -213,6 +213,74 @@ public class S3StorageProviderTests
         Assert.True(Guid.TryParse(Path.GetFileNameWithoutExtension(path), out _));
     }
 
+    // The existence check is a single conditional PUT, not a HEAD followed by a PUT (which races).
+    [Fact]
+    public async Task Store_OverwriteFalse_UsesIfNoneMatch_AndNoHeadRequest()
+    {
+        var provider = Create();
+        using var content = new MemoryStream([1]);
+
+        await provider.StoreAsync(content, "new.txt", new StorageWriteOptions { Overwrite = false }, "Text");
+
+        Assert.Equal("*", Assert.Single(_s3.PutRequests).IfNoneMatch);
+        _s3.Client.Verify(c => c.GetObjectMetadataAsync(It.IsAny<GetObjectMetadataRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Store_OverwriteTrue_SendsNoCondition()
+    {
+        await Create().StoreAsync("a.txt", [1], "Text");
+
+        Assert.Null(Assert.Single(_s3.PutRequests).IfNoneMatch);
+    }
+
+    [Fact]
+    public async Task Store_OverwriteFalse_Race_ExactlyOneWins()
+    {
+        var provider = Create();
+        var results = await Task.WhenAll(Enumerable.Range(0, 10).Select(async i =>
+        {
+            using var content = new MemoryStream([(byte)i]);
+            try
+            {
+                await provider.StoreAsync(content, "race.txt", new StorageWriteOptions { Overwrite = false }, "Text");
+                return true;
+            }
+            catch (StorageException e) when (e.ErrorCode == "STORAGE_OBJECT_EXISTS")
+            {
+                return false;
+            }
+        }));
+
+        Assert.Equal(1, results.Count(r => r));
+    }
+
+    [Fact]
+    public async Task Store_OverwriteFalse_PreconditionFailed_MapsToConflict()
+    {
+        _s3.Client.Setup(c => c.PutObjectAsync(It.IsAny<PutObjectRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(S3Error(HttpStatusCode.PreconditionFailed, "PreconditionFailed"));
+        using var content = new MemoryStream([1]);
+
+        var ex = await Assert.ThrowsAsync<StorageException>(() =>
+            Create().StoreAsync(content, "a.txt", new StorageWriteOptions { Overwrite = false }, "Text"));
+
+        Assert.Equal(HttpStatusCode.Conflict, ex.HttpStatusCode);
+        Assert.Equal("STORAGE_OBJECT_EXISTS", ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task GetPublicUrl_TextPlain_IsAlwaysAnAttachment_EvenWhenInlineIsRequested()
+    {
+        GetPreSignedUrlRequest? captured = null;
+        _s3.Client.Setup(c => c.GetPreSignedURLAsync(It.IsAny<GetPreSignedUrlRequest>()))
+            .Callback<GetPreSignedUrlRequest>(r => captured = r).ReturnsAsync("https://h/x");
+
+        await Create().GetPublicUrlAsync("note.txt", new PublicUrlOptions { Inline = true, DownloadFileName = "note.txt" }, "Text");
+
+        Assert.StartsWith("attachment", captured!.ResponseHeaderOverrides.ContentDisposition);
+    }
+
     [Fact]
     public async Task Store_OverwriteFalse_ChecksExistenceFirst()
     {

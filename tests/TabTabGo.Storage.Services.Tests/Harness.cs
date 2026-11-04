@@ -94,6 +94,8 @@ public class HookedFileService : FileService<File>
 
     public bool RejectDelete { get; set; }
 
+    public string? VetoTitle { get; set; }
+
     public override bool IsValidToCreate(File entity, out string validationErrorMessage)
     {
         Events.Add("IsValidToCreate");
@@ -117,7 +119,7 @@ public class HookedFileService : FileService<File>
     {
         Events.Add("IsValidToUpdate");
         validationErrorMessage = "vetoed";
-        return !RejectUpdate;
+        return !RejectUpdate && (VetoTitle is null || entity?.Title != VetoTitle);
     }
 
     public override Task PreUpdate(File current, File entity, CancellationToken cancellationToken)

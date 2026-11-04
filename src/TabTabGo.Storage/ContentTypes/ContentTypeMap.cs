@@ -75,6 +75,11 @@ public static class ContentTypeMap
     public static bool IsSafeToRender(string? contentType) =>
         !string.IsNullOrEmpty(contentType) && RenderSafeTypes.Contains(contentType);
 
+    /// <summary>Like <see cref="IsSafeToRender"/> but for signed URLs.</summary>
+    /// <param name="contentType">Media type to test.</param>
+    /// <returns><c>true</c> when allow-listed.</returns>
+    public static bool IsSafeToRenderSigned(string? contentType) => IsSafeToRender(contentType);
+
     /// <summary>
     /// Chooses the response content type for a download. The caller's value is never echoed: the result is always the
     /// type derived from the object's extension, so a requested override only matters if it equals that type.

@@ -16,6 +16,14 @@ public sealed class FakeS3
             .Returns<PutObjectRequest, CancellationToken>(async (request, ct) =>
             {
                 ct.ThrowIfCancellationRequested();
+                lock (Objects)
+                {
+                    if (request.IfNoneMatch == "*" && Objects.ContainsKey(request.BucketName + "/" + request.Key))
+                    {
+                        throw new AmazonS3Exception("precondition failed") { StatusCode = HttpStatusCode.PreconditionFailed, ErrorCode = "PreconditionFailed" };
+                    }
+                }
+
                 using var copy = new MemoryStream();
                 await request.InputStream.CopyToAsync(copy, ct);
                 PutRequests.Add(request);

@@ -84,11 +84,11 @@ public class ServicesDiTests : IDisposable
     }
 
     [Fact]
-    public void Defaults_DenyActiveContent_AndHaveNoSizeLimit()
+    public void Defaults_DenyActiveContent_AndCapTheSize()
     {
         var options = new StorageServiceOptions();
 
-        Assert.Null(options.MaxFileSizeBytes);
+        Assert.Equal(50L * 1024 * 1024, options.MaxFileSizeBytes);
         Assert.Empty(options.AllowedExtensions);
         foreach (var ext in new[] { "html", ".HTM", "svg", ".js", "mjs", "xml", ".xhtml", "xht", "xsl", "xslt", "exe", "dll" })
         {

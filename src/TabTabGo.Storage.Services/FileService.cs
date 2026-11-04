@@ -481,6 +481,19 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         }
     }
 
+    /// <summary>Hard-deletes one file (even a soft-deleted one): the row, then its stored objects.</summary>
+    /// <param name="id">File id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The purged entity.</returns>
+    public Task<TFile> Purge(long id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+
+    /// <summary>Hard-deletes several files (even soft-deleted ones): the rows, then their stored objects.</summary>
+    /// <param name="ids">File ids.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The purged entities.</returns>
+    public Task<IEnumerable<TFile>> Purge(IEnumerable<long> ids, CancellationToken cancellationToken = default) =>
+        throw new NotImplementedException();
+
     #endregion
 
     private sealed record StoredObject(string Container, string Path);

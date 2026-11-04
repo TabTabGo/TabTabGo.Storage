@@ -90,6 +90,17 @@ public class ContentTypeMapTests
     public void ChooseResponseType_AlwaysTheExtensionType(string? requested, string path, string expected) =>
         Assert.Equal(expected, ContentTypeMap.ChooseResponseType(requested, path));
 
+    [Theory]
+    [InlineData("image/png", true)]
+    [InlineData("application/pdf", true)]
+    [InlineData("video/mp4", true)]
+    [InlineData("text/plain", false)]
+    [InlineData("image/svg+xml", false)]
+    [InlineData("text/html", false)]
+    [InlineData(null, false)]
+    public void IsSafeToRenderSigned_ExcludesTextPlain(string? contentType, bool expected) =>
+        Assert.Equal(expected, ContentTypeMap.IsSafeToRenderSigned(contentType));
+
     [Fact]
     public void IsActiveContent_PlainTypesAreNot()
     {

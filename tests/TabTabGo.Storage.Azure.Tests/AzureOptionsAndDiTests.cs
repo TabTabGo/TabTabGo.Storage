@@ -12,6 +12,74 @@ namespace TabTabGo.Storage.Azure.Tests;
 
 public class ContainerNameTests
 {
+    // The 6.0.8.4 algorithm, copied verbatim, is the reference for every name 6.x could already store.
+    private static string Legacy(string input)
+    {
+        input = input.Trim().ToLower();
+        input = input.Replace(" ", "-");
+        input = System.Text.RegularExpressions.Regex.Replace(input, @"[^a-z0-9\-]", "");
+        if (input.Length > 63)
+        {
+            input = input.Substring(0, 63);
+        }
+
+        input = input.Trim('-');
+        if (input.Length < 1)
+        {
+            throw new ArgumentException("Resulting string is empty");
+        }
+
+        return input;
+    }
+
+    private static bool AzureAccepts(string name) =>
+        System.Text.RegularExpressions.Regex.IsMatch(name, "^[a-z0-9](?:[a-z0-9]|-(?!-)){1,61}[a-z0-9]$");
+
+    [Theory]
+    [InlineData("Image")]
+    [InlineData("PDF")]
+    [InlineData("Word Document")]
+    [InlineData("my_files")]
+    [InlineData("snake_case_name")]
+    [InlineData("UPPER_and Spaces!!")]
+    [InlineData("unknown")]
+    [InlineData("a-b-c")]
+    [InlineData("files.v2")]
+    [InlineData("caf\u00e9 files")]
+    [InlineData("x y z")]
+    [InlineData("abc")]
+    [InlineData("---abc---")]
+    [InlineData("  padded  ")]
+    [InlineData("0123456789012345678901234567890123456789012345678901234567890123456789")]
+    public void Normalizer_GivesExactlyTheLegacyName_ForEveryNameLegacyAccepted(string input)
+    {
+        var legacy = Legacy(input);
+        Assert.True(AzureAccepts(legacy), $"test input {input} is not a legacy-valid name");
+
+        Assert.Equal(legacy, ContainerNameNormalizer.Normalize(input));
+    }
+
+    [Fact]
+    public void Normalizer_MyFiles_StaysMyfiles_SoExistingBlobsStayReachable() =>
+        Assert.Equal("myfiles", ContainerNameNormalizer.Normalize("my_files"));
+
+    [Theory]
+    [InlineData("ab")]
+    [InlineData("a")]
+    [InlineData("a--b")]
+    [InlineData("a---b-c")]
+    [InlineData("-a-")]
+    public void Normalizer_OnlyNamesThatFailedAtAzureAreChanged_AndTheResultIsValid(string input)
+    {
+        string? legacy = null;
+        try { legacy = Legacy(input); } catch (ArgumentException) { }
+
+        var normalized = ContainerNameNormalizer.Normalize(input);
+
+        Assert.True(AzureAccepts(normalized), normalized);
+        Assert.True(legacy is null || !AzureAccepts(legacy), "legacy accepted this name, so it must be unchanged");
+    }
+
     // Z-9
     [Theory]
     [InlineData("Image", "image")]
@@ -21,13 +89,17 @@ public class ContainerNameTests
     [InlineData("a", "a00")]
     [InlineData("a--b", "a-b")]
     [InlineData("-lead-and-trail-", "lead-and-trail")]
-    [InlineData("under_score", "under-score")]
-    [InlineData("UPPER_and Spaces!!", "upper-and-spaces")]
+    [InlineData("under_score", "underscore")]
+    [InlineData("UPPER_and Spaces!!", "upperand-spaces")]
     [InlineData("unknown", "unknown")]
     [InlineData("-a-", "a00")]
     [InlineData("c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7", "c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d")]
     public void ContainerName_Theory(string input, string expected) =>
         Assert.Equal(expected, ContainerNameNormalizer.Normalize(input));
+
+    [Fact]
+    public void ContainerName_TruncatedAtHyphen_IsTrimmed_LikeLegacy() =>
+        Assert.Equal(Legacy(new string('a', 62) + "-b"), ContainerNameNormalizer.Normalize(new string('a', 62) + "-b"));
 
     [Fact]
     public void ContainerName_TruncatedAtHyphen_IsTrimmed()

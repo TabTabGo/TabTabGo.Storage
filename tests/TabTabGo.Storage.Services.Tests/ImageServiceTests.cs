@@ -288,7 +288,7 @@ public class ImageServiceTests : IDisposable
     {
         var options = new ImageServiceOptions();
 
-        Assert.Equal(50_000_000, options.MaxPixels);
+        Assert.Equal(25_000_000, options.MaxPixels);
         Assert.Equal(90, options.JpegQuality);
     }
 
