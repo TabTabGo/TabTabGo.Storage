@@ -3,7 +3,12 @@ using System.Text.RegularExpressions;
 
 namespace TabTabGo.Storage.AzureStorage;
 
-/// <summary>Turns a logical container name into a valid Azure container name (3-63 chars, [a-z0-9-], no "--").</summary>
+/// <summary>
+/// Maps a logical container name to an Azure container name. For every name that 6.x could already store, the result is
+/// exactly the 6.0.8.4 output (trim, lower-case, space to hyphen, drop everything but [a-z0-9-], cut at 63, trim
+/// hyphens) - otherwise existing blobs become unreachable. Only names that Azure rejected before (a "--" run, or fewer
+/// than 3 characters) are adjusted: hyphen runs collapse and short names are padded with <c>0</c>.
+/// </summary>
 internal static partial class ContainerNameNormalizer
 {
     private const int MinLength = 3;
@@ -15,26 +20,37 @@ internal static partial class ContainerNameNormalizer
     [GeneratedRegex("-{2,}")]
     private static partial Regex RepeatedHyphens();
 
-    /// <summary>Normalises the name; names shorter than 3 characters are padded with <c>0</c>.</summary>
+    /// <summary>Normalises the name.</summary>
     /// <exception cref="ArgumentException">Nothing valid is left of the name.</exception>
     public static string Normalize(string? input)
     {
-        if (string.IsNullOrWhiteSpace(input))
+        if (string.IsNullOrEmpty(input))
         {
             throw new ArgumentException("Container name must not be empty.", nameof(input));
         }
 
-        var name = input.Trim().ToLowerInvariant().Replace(' ', '-').Replace('_', '-');
+        // The 6.0.8.4 algorithm, unchanged.
+        var name = input.Trim().ToLower().Replace(" ", "-");
         name = InvalidChars().Replace(name, string.Empty);
-        name = RepeatedHyphens().Replace(name, "-").Trim('-');
         if (name.Length > MaxLength)
         {
-            name = name[..MaxLength].Trim('-');
+            name = name[..MaxLength];
         }
 
-        if (name.Length == 0)
+        name = name.Trim('-');
+        if (name.Length < 1)
         {
             throw new ArgumentException("Container name has no valid characters.", nameof(input));
+        }
+
+        // Names Azure used to reject (400 InvalidResourceName) are the only ones that may change.
+        if (name.Contains("--", StringComparison.Ordinal))
+        {
+            name = RepeatedHyphens().Replace(name, "-").Trim('-');
+            if (name.Length < 1)
+            {
+                throw new ArgumentException("Container name has no valid characters.", nameof(input));
+            }
         }
 
         if (name.Length >= MinLength)

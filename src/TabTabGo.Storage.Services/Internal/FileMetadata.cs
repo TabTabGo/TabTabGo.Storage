@@ -35,6 +35,40 @@ internal static class FileMetadata<TFile>
         Converters = { new JsonStringEnumConverter() },
     };
 
+    /// <summary>Captures the allow-listed fields so a failed update can put them back on the tracked instance.</summary>
+    public static Action Snapshot(TFile file)
+    {
+        var title = file.Title;
+        var comment = file.Comment;
+        var referenceType = ReferenceType?.GetValue(file);
+        var referenceId = ReferenceId?.GetValue(file);
+        var duration = Duration?.GetValue(file);
+        var extra = file.ExtraProperties is null ? null : new Dictionary<string, object>(file.ExtraProperties);
+        return () =>
+        {
+            file.Title = title;
+            file.Comment = comment;
+            ReferenceType?.SetValue(file, referenceType);
+            ReferenceId?.SetValue(file, referenceId);
+            Duration?.SetValue(file, duration);
+            file.ExtraProperties = extra!;
+        };
+    }
+
+    /// <summary>Reads the requested <c>FileType</c> of a JSON document without applying anything.</summary>
+    public static FileType? ReadFileType(JsonObject json)
+    {
+        foreach (var (name, node) in json)
+        {
+            if (string.Equals(name, "FileType", StringComparison.OrdinalIgnoreCase))
+            {
+                return node is null ? null : Convert<FileType>(node, name);
+            }
+        }
+
+        return null;
+    }
+
     public static bool Has(string name) => typeof(TFile).GetProperty(name) is not null;
 
     /// <summary>Copies the allow-listed fields of a whole-entity update. Null strings keep the current value.</summary>

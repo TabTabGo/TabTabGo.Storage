@@ -109,12 +109,6 @@ public class S3StorageProvider : StorageProvider, IDisposable
         MemoryStream? buffered = null;
         try
         {
-            if (options is { Overwrite: false } && await ExistsCoreAsync(key, container, relative, ct).ConfigureAwait(false))
-            {
-                throw new StorageException("Object already exists.", ProviderName, "Store", container, relative,
-                    HttpStatusCode.Conflict, code: "STORAGE_OBJECT_EXISTS");
-            }
-
             var input = content;
             if (!content.CanSeek)
             {
@@ -132,10 +126,19 @@ public class S3StorageProvider : StorageProvider, IDisposable
                 InputStream = input,
                 AutoCloseStream = false,
                 ContentType = options?.ContentType ?? ContentTypeMap.FromExtension(Path.GetExtension(relative)),
+                // One conditional PUT instead of HEAD-then-PUT: no race between concurrent writers.
+                IfNoneMatch = options is { Overwrite: false } ? "*" : null,
             };
 
             await Client.PutObjectAsync(request, ct).ConfigureAwait(false);
             return relative;
+        }
+        catch (AmazonS3Exception e) when (options is { Overwrite: false } &&
+                                          (e.StatusCode == HttpStatusCode.PreconditionFailed ||
+                                           e.StatusCode == HttpStatusCode.Conflict))
+        {
+            throw new StorageException("Object already exists.", ProviderName, "Store", container, relative,
+                HttpStatusCode.Conflict, e, "STORAGE_OBJECT_EXISTS");
         }
         catch (Exception e) when (IsUpstream(e))
         {
@@ -269,7 +272,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
         // Only a safe-to-render type may be overridden; anything else falls back to the extension's type, and
         // active content is always an attachment.
         var contentType = ContentTypeMap.ChooseResponseType(options.ContentType, relative);
-        var inline = options.Inline && ContentTypeMap.IsSafeToRender(contentType);
+        var inline = options.Inline && ContentTypeMap.IsSafeToRenderSigned(contentType);
         request.ResponseHeaderOverrides = new ResponseHeaderOverrides
         {
             ContentType = contentType,

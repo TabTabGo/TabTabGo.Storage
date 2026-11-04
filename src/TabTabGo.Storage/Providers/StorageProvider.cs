@@ -104,7 +104,8 @@ public abstract class StorageProvider : IStorageProvider
     }
 
     /// <summary>
-    /// Normalises a container name, converting an unsafe name into a 400 <see cref="StorageException"/>.
+    /// Validates a container name (a single, safe path segment), converting anything else into a 400
+    /// <see cref="StorageException"/>.
     /// </summary>
     /// <param name="provider">Provider name for the exception.</param>
     /// <param name="operation">Operation name for the exception.</param>
@@ -112,7 +113,8 @@ public abstract class StorageProvider : IStorageProvider
     /// <returns>The normalised container name.</returns>
     protected static string NormalizeContainer(string provider, string operation, string? container)
     {
-        if (container is null || !StoragePath.IsSafe(container))
+        // A container is exactly one path segment: nested names would alias other containers (a/b + c vs a + b/c).
+        if (container is null || !StoragePath.IsSafe(container) || StoragePath.Normalize(container).Contains('/'))
         {
             throw new StorageException("The storage container is not valid.", provider, operation, container, null,
                 HttpStatusCode.BadRequest, code: "STORAGE_INVALID_CONTAINER");

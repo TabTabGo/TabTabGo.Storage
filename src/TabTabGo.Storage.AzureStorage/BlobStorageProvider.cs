@@ -221,7 +221,7 @@ public class BlobStorageProvider : StorageProvider
         var expiresOn = DateTimeOffset.UtcNow.Add(options.GetEffectiveExpiry(_options.DefaultSasExpiry));
         // Only a safe-to-render type may be overridden; active content is always an attachment.
         var contentType = ContentTypeMap.ChooseResponseType(options.ContentType, relative);
-        var inline = options.Inline && ContentTypeMap.IsSafeToRender(contentType);
+        var inline = options.Inline && ContentTypeMap.IsSafeToRenderSigned(contentType);
         var builder = new BlobSasBuilder
         {
             BlobContainerName = containerClient.Name,
@@ -265,10 +265,13 @@ public class BlobStorageProvider : StorageProvider
         string filePath)
     {
         var relative = NormalizePath(ProviderName, operation, container, filePath);
+
+        // Reject unsafe input first (traversal, nesting, control characters); only then map the logical name to Azure's rules.
+        var safeContainer = NormalizeContainer(ProviderName, operation, container);
         string containerName;
         try
         {
-            containerName = ContainerNameNormalizer.Normalize(container);
+            containerName = ContainerNameNormalizer.Normalize(safeContainer);
         }
         catch (ArgumentException)
         {

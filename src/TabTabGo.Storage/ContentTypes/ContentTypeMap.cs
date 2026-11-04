@@ -75,10 +75,15 @@ public static class ContentTypeMap
     public static bool IsSafeToRender(string? contentType) =>
         !string.IsNullOrEmpty(contentType) && RenderSafeTypes.Contains(contentType);
 
-    /// <summary>Like <see cref="IsSafeToRender"/> but for signed URLs.</summary>
+    /// <summary>
+    /// Like <see cref="IsSafeToRender"/> but for presigned / SAS URLs, which are served from the storage provider's own
+    /// origin without our headers (no <c>X-Content-Type-Options: nosniff</c>). <c>text/plain</c> is therefore excluded:
+    /// browsers may sniff it as HTML.
+    /// </summary>
     /// <param name="contentType">Media type to test.</param>
-    /// <returns><c>true</c> when allow-listed.</returns>
-    public static bool IsSafeToRenderSigned(string? contentType) => IsSafeToRender(contentType);
+    /// <returns><c>true</c> when allow-listed for inline rendering from a signed URL.</returns>
+    public static bool IsSafeToRenderSigned(string? contentType) =>
+        IsSafeToRender(contentType) && !string.Equals(contentType, "text/plain", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Chooses the response content type for a download. The caller's value is never echoed: the result is always the

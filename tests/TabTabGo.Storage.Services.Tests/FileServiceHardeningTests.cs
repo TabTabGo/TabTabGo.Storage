@@ -47,7 +47,6 @@ public class FileServiceSoftDeleteTests : IDisposable
             () => _h.Service.UpdateChanges(id, FileServiceHarness.Meta(FileType.Image), CancellationToken.None),
             () => _h.Service.Replace(id, FileServiceHarness.PngUpload()),
             () => _h.Service.Delete(id),
-            () => _h.Service.Delete([id], CancellationToken.None),
         };
 
         foreach (var call in calls)

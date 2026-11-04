@@ -21,8 +21,9 @@ using TabTabGo.Storage.ViewModels;
 namespace TabTabGo.Storage.Services;
 
 // Core 8.0.1 declares BaseService/BaseReadService members whose nullability differs from IBaseService/IBaseReadService.
-// Any subclass inherits those mismatches; they are Core's to fix (reported), not Storage's.
-#pragma warning disable CS8767, CS8614, CS8765
+// Any subclass inherits those mismatches at the class declaration (reported to Core). The suppression covers the
+// declaration line only; the one overridden member that needs it (Create) has its own scope.
+#pragma warning disable CS8767, CS8614
 
 /// <summary>
 /// Upload, replace, update, read and delete for file metadata and content. Storage-owned fields (path, size,
@@ -31,6 +32,7 @@ namespace TabTabGo.Storage.Services;
 /// </summary>
 /// <typeparam name="TFile">File entity type.</typeparam>
 public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> where TFile : class, IFile
+#pragma warning restore CS8767, CS8614
 {
     private static readonly ImageSize[] ThumbnailSizes =
         Enum.GetValues<ImageSize>().Where(s => s != ImageSize.Default).ToArray();
@@ -152,7 +154,9 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         var bytes = ResizeToBytes(source, size, file.FilePath);
         try
         {
-            await _storageProvider.StoreAsync(thumbnailPath, bytes, container).ConfigureAwait(false);
+            using var cache = new MemoryStream(bytes, writable: false);
+            await _storageProvider.StoreAsync(cache, thumbnailPath, new StorageWriteOptions { ContentType = thumbnailType },
+                container, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -191,32 +195,48 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Never returns.</returns>
     /// <exception cref="ApiException">Always 400 <c>FILE_CONTENT_REQUIRED</c>.</exception>
+#pragma warning disable CS8765, CS8767
     public override Task<TFile> Create(TFile entity, CancellationToken cancellationToken = default) =>
+#pragma warning restore CS8765, CS8767
         throw new ApiException("Select a file to upload. Use Upload(metadata, content).", null, LogLevel.Warning, null,
             HttpStatusCode.BadRequest, "FILE_CONTENT_REQUIRED");
 
+    /// <remarks>
+    /// <c>IsValidToCreate</c> and <c>PreCreate</c> run <b>before</b> the content is stored, so a veto stores nothing; the
+    /// storage fields (path, size, extension, original name and media type) are not populated yet - use
+    /// <c>PostCreate</c> for logic that needs them. Audit fields (<c>CreatedBy</c>, <c>UpdatedBy</c>) and
+    /// <c>ExtraProperties</c> are taken from <paramref name="metadata"/>: build it from the authenticated user in
+    /// server code and never bind it straight from a request body. <c>IsEnabled</c>, dates and <c>IsCompressed</c> are reset.
+    /// </remarks>
     /// <inheritdoc />
     public async Task<TFile> Upload(TFile metadata, FileUpload content, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(content);
+        EnsureDefined(metadata.FileType);
+        var prepared = Prepare(content);
+
+        metadata.FileId = 0;
+        metadata.IsEnabled = true;
+        metadata.CreatedDate = _timeProvider.GetUtcNow();
+        metadata.UpdatedDate = default;
+        metadata.IsCompressed = null;
+        FileMetadata<TFile>.EnsureRequiredStrings(metadata, prepared.FileName);
+
+        if (!IsValidToCreate(metadata, out var error))
+        {
+            throw new ApiException($"Failed to create file. {error}", null, LogLevel.Warning, 2001,
+                HttpStatusCode.BadRequest, "FILE_INVALID");
+        }
+
+        await PreCreate(metadata, cancellationToken).ConfigureAwait(false);
 
         var stored = new List<StoredObject>();
         try
         {
-            var result = await StoreContentAsync(metadata.FileType, content, stored, cancellationToken)
+            var result = await StoreContentAsync(metadata.FileType, content, prepared, stored, cancellationToken)
                 .ConfigureAwait(false);
-            metadata.FileId = 0;
             ApplyStorageFields(metadata, result);
-            FileMetadata<TFile>.EnsureRequiredStrings(metadata, result.OriginalFileName);
-
-            if (!IsValidToCreate(metadata, out var error))
-            {
-                throw new ApiException($"Failed to create file. {error}", null, LogLevel.Warning, 2001,
-                    HttpStatusCode.BadRequest, "FILE_INVALID");
-            }
-
-            await PreCreate(metadata, cancellationToken).ConfigureAwait(false);
             await Repo.InsertAsync(metadata, cancellationToken).ConfigureAwait(false);
             await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -234,7 +254,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     public async Task<TFile> Replace(long id, FileUpload content, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(content);
-        var file = await GetTrackedAsync(id, cancellationToken).ConfigureAwait(false);
+        var file = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
         if (!IsValidToUpdate(file, out var error))
         {
             throw new ApiException($"Failed to update file. {error}", null, LogLevel.Warning, 4001,
@@ -242,6 +262,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         }
 
         await PreUpdate(file, file, cancellationToken).ConfigureAwait(false);
+        var prepared = Prepare(content);
         var oldPath = file.FilePath;
         var oldType = file.FileType;
         var previous = new StoredContent(file.FilePath, file.FileSize ?? 0, file.FileExtension, file.OriginalFileName,
@@ -250,7 +271,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         var stored = new List<StoredObject>();
         try
         {
-            var result = await StoreContentAsync(file.FileType, content, stored, cancellationToken).ConfigureAwait(false);
+            var result = await StoreContentAsync(file.FileType, content, prepared, stored, cancellationToken)
+                .ConfigureAwait(false);
             ApplyStorageFields(file, result);
             await Repo.UpdateAsync(file, cancellationToken).ConfigureAwait(false);
             await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -274,6 +296,10 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     #region Update
 
     /// <summary>Updates the allow-listed fields (title, comment, reference, duration, type, extra properties).</summary>
+    /// <remarks>
+    /// <c>FileType</c> left at <c>Unknown</c> (a DTO that omits it) means "unchanged"; an undefined value is a 400.
+    /// <c>IsValidToUpdate</c> receives the incoming entity, as in Core's <c>BaseService</c>.
+    /// </remarks>
     /// <param name="id">File id.</param>
     /// <param name="entity">Client values; storage-owned fields are ignored.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -281,16 +307,27 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     public override async Task<TFile> Update(long id, TFile entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        var current = await GetTrackedAsync(id, cancellationToken).ConfigureAwait(false);
-        if (!IsValidToUpdate(current, out var error))
+        var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
+        EnsureDefined(entity.FileType);
+        if (!IsValidToUpdate(entity, out var error))
         {
             throw new ApiException($"Failed to update file. {error}", null, LogLevel.Warning, 4001,
                 HttpStatusCode.BadRequest, "FILE_INVALID");
         }
 
         await PreUpdate(current, entity, cancellationToken).ConfigureAwait(false);
-        FileMetadata<TFile>.CopyFrom(current, entity);
-        return await FinishUpdateAsync(current, entity.FileType, cancellationToken).ConfigureAwait(false);
+        var undo = FileMetadata<TFile>.Snapshot(current);
+        try
+        {
+            FileMetadata<TFile>.CopyFrom(current, entity);
+            var newType = entity.FileType == FileType.Unknown ? current.FileType : entity.FileType;
+            return await FinishUpdateAsync(current, newType, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            undo();
+            throw;
+        }
     }
 
     /// <summary>Updates the allow-listed members present in the JSON document; every other member is ignored.</summary>
@@ -301,7 +338,13 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     public override async Task<TFile> Update(long id, JsonObject entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        var current = await GetTrackedAsync(id, cancellationToken).ConfigureAwait(false);
+        var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
+        var requested = FileMetadata<TFile>.ReadFileType(entity);
+        if (requested is { } type)
+        {
+            EnsureDefined(type);
+        }
+
         if (!IsValidToUpdate(current, out var error))
         {
             throw new ApiException($"Failed to update file. {error}", null, LogLevel.Warning, 4002,
@@ -309,8 +352,18 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         }
 
         await PreUpdate(current, entity, cancellationToken).ConfigureAwait(false);
-        var requested = FileMetadata<TFile>.ApplyJson(current, entity);
-        return await FinishUpdateAsync(current, requested ?? current.FileType, cancellationToken).ConfigureAwait(false);
+        var undo = FileMetadata<TFile>.Snapshot(current);
+        try
+        {
+            FileMetadata<TFile>.ApplyJson(current, entity);
+            var newType = requested is null or FileType.Unknown ? current.FileType : requested.Value;
+            return await FinishUpdateAsync(current, newType, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            undo();
+            throw;
+        }
     }
 
     /// <summary>JSON-patch updates are limited to the same allow-list as other updates.</summary>
@@ -319,7 +372,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The updated entity.</returns>
     /// <exception cref="ApiException">An operation targets a storage-owned field (400).</exception>
-    public override Task<TFile> Update(long id, JsonPatchDocument<TFile> entity,
+    public override async Task<TFile> Update(long id, JsonPatchDocument<TFile> entity,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -341,8 +394,38 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             }
         }
 
-        return base.Update(id, entity, cancellationToken);
+        var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
+        if (!IsValidToUpdate(current, out var error))
+        {
+            throw new ApiException($"Failed to update file. {error}", null, LogLevel.Warning, 4002,
+                HttpStatusCode.BadRequest, "FILE_INVALID");
+        }
+
+        await PreUpdate(current, entity, cancellationToken).ConfigureAwait(false);
+        var undo = FileMetadata<TFile>.Snapshot(current);
+        try
+        {
+            entity.ApplyTo(current, patchError => throw new ApiException(patchError.ErrorMessage, null, LogLevel.Warning,
+                null, HttpStatusCode.BadRequest, "INVALID_PATCH"));
+            return await FinishUpdateAsync(current, current.FileType, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            undo();
+            throw;
+        }
     }
+
+    /// <summary>
+    /// Routed through <see cref="Update(long, TFile, CancellationToken)"/>: the base implementation saves whatever the
+    /// tracked entity holds, which would bypass the allow-list.
+    /// </summary>
+    /// <param name="id">File id.</param>
+    /// <param name="entity">Client values; storage-owned fields are ignored.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated entity.</returns>
+    public override Task<TFile> UpdateChanges(long id, TFile entity, CancellationToken cancellationToken) =>
+        Update(id, entity, cancellationToken);
 
     private async Task<TFile> FinishUpdateAsync(TFile current, FileType newType, CancellationToken ct)
     {
@@ -377,98 +460,137 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     }
 
     // Copies the object to the container of the new type (and builds or drops thumbnails) before the row changes.
+    // Non-images are streamed; images are buffered once because the thumbnails are built before anything is stored.
     private async Task RelocateAsync(TFile file, FileType oldType, FileType newType, List<StoredObject> created,
         CancellationToken ct)
     {
-        await using var source = await _storageProvider.RetrieveAsync(file.FilePath, oldType.ToString(), ct)
+        var newContainer = newType.ToString();
+        var options = new StorageWriteOptions { ContentType = ContentTypeMap.FromExtension(file.FileExtension) };
+        await using var source = await _storageProvider.OpenReadAsync(file.FilePath, oldType.ToString(), ct)
             .ConfigureAwait(false) ?? throw NotFound(file.FileId);
+
+        if (newType != FileType.Image)
+        {
+            await _storageProvider.StoreAsync(source, file.FilePath, options, newContainer, ct).ConfigureAwait(false);
+            created.Add(new StoredObject(newContainer, file.FilePath));
+            return;
+        }
+
         using var buffer = new MemoryStream();
         await source.CopyToAsync(buffer, ct).ConfigureAwait(false);
-        var bytes = buffer.ToArray();
+        var bytes = buffer.GetBuffer();
+        var length = (int)buffer.Length;
+        var thumbnails = ThumbnailSizes.ToDictionary(s => s, s => ResizeToBytes(new MemoryStream(bytes, 0, length, false), s, file.FilePath));
 
-        await _storageProvider.StoreAsync(file.FilePath, bytes, newType.ToString()).ConfigureAwait(false);
-        created.Add(new StoredObject(newType.ToString(), file.FilePath));
-        if (newType == FileType.Image)
-        {
-            await StoreThumbnailsAsync(bytes, file.FilePath, created, ct).ConfigureAwait(false);
-        }
+        using var original = new MemoryStream(bytes, 0, length, false);
+        await _storageProvider.StoreAsync(original, file.FilePath, options, newContainer, ct).ConfigureAwait(false);
+        created.Add(new StoredObject(newContainer, file.FilePath));
+        await StoreThumbnailsAsync(thumbnails, file.FilePath, newContainer, created, ct).ConfigureAwait(false);
     }
 
     #endregion
 
-    #region Delete
+    #region Delete and purge
 
-    /// <summary>Hard-deletes a file: removes the row, then its stored objects and thumbnails.</summary>
+    /// <summary>
+    /// Soft-deletes a file (<c>IsEnabled = false</c>), as Core and 6.x do. The stored objects are kept; use
+    /// <see cref="Purge(long, CancellationToken)"/> to remove them.
+    /// </summary>
     /// <param name="id">File id.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The deleted entity.</returns>
+    /// <returns>The disabled entity.</returns>
     public override async Task<TFile> Delete(long id, CancellationToken cancellationToken = default)
     {
-        var file = await GetTrackedAsync(id, cancellationToken).ConfigureAwait(false);
-        if (!IsValidToDelete(file, out var error))
-        {
-            throw new ApiException($"Can't delete file {id}. {error}", null, LogLevel.Warning, null,
-                HttpStatusCode.BadRequest, "FILE_DELETE_REJECTED");
-        }
-
+        var file = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
+        EnsureAllDeletable([file]);
         await PreDelete(file, cancellationToken).ConfigureAwait(false);
-        Repo.Delete(file);
+        file.IsEnabled = false;
         await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        await RemoveObjectsAsync(file.FileType, file.FilePath).ConfigureAwait(false);
         await PostDelete(file, cancellationToken).ConfigureAwait(false);
         return file;
     }
 
-    /// <summary>Hard-deletes several files; stored objects are removed after the rows.</summary>
+    /// <summary>Soft-deletes several files (already disabled ones are skipped). The stored objects are kept.</summary>
     /// <param name="ids">File ids.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The deleted entities.</returns>
+    /// <returns>The files that were disabled.</returns>
     public override async Task<IEnumerable<TFile>> Delete(IEnumerable<long> ids, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(ids);
         var idList = ids.ToList();
-        var files = (await Repo.GetAsync(f => idList.Contains(f.FileId), cancellationToken: cancellationToken)
-            .ConfigureAwait(false)).ToList();
+        var files = await LoadManyAsync(f => idList.Contains(f.FileId) && f.IsEnabled, cancellationToken)
+            .ConfigureAwait(false);
         EnsureAllDeletable(files);
         await PreDelete(files, cancellationToken).ConfigureAwait(false);
         foreach (var file in files)
         {
-            Repo.Delete(file);
+            file.IsEnabled = false;
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var file in files)
-        {
-            await RemoveObjectsAsync(file.FileType, file.FilePath).ConfigureAwait(false);
-        }
-
         await PostDelete(files, cancellationToken).ConfigureAwait(false);
         return files;
     }
 
-    /// <inheritdoc />
+    /// <summary>Hard-deletes the matching rows (as in 6.x), then their stored objects and thumbnails.</summary>
+    /// <param name="query">Filter selecting the files.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes when the rows and objects are removed.</returns>
     public async Task Delete(Expression<Func<TFile, bool>> query, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);
-        var files = (await Repo.GetAsync(query, cancellationToken: cancellationToken).ConfigureAwait(false)).ToList();
+        var files = await LoadManyAsync(query, cancellationToken).ConfigureAwait(false);
+        await HardDeleteAsync(files, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Hard-deletes one file, soft-deleted or not: the row, then its stored objects and thumbnails. Not part of
+    /// <see cref="IFileService{TFile}"/>: it is deliberately explicit.
+    /// </summary>
+    /// <param name="id">File id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The purged entity.</returns>
+    public async Task<TFile> Purge(long id, CancellationToken cancellationToken = default)
+    {
+        var file = await LoadTrackedAsync(id, includeDisabled: true, cancellationToken).ConfigureAwait(false);
+        await HardDeleteAsync([file], cancellationToken).ConfigureAwait(false);
+        return file;
+    }
+
+    /// <summary>Hard-deletes several files, soft-deleted or not: the rows, then their stored objects and thumbnails.</summary>
+    /// <param name="ids">File ids; ids that do not exist are ignored.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The purged entities.</returns>
+    public async Task<IEnumerable<TFile>> Purge(IEnumerable<long> ids, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        var idList = ids.ToList();
+        var files = await LoadManyAsync(f => idList.Contains(f.FileId), cancellationToken).ConfigureAwait(false);
+        await HardDeleteAsync(files, cancellationToken).ConfigureAwait(false);
+        return files;
+    }
+
+    // Rows first: if the save fails the stored objects are untouched. Object paths come from the restored (database) values.
+    private async Task HardDeleteAsync(List<TFile> files, CancellationToken ct)
+    {
         EnsureAllDeletable(files);
-        await PreDelete(files, cancellationToken).ConfigureAwait(false);
+        await PreDelete(files, ct).ConfigureAwait(false);
+        var objects = files.Select(f => (f.FileType, f.FilePath)).ToList();
         foreach (var file in files)
         {
             Repo.Delete(file);
         }
 
-        // Rows first: if the save fails the stored objects are untouched.
-        await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var file in files)
+        await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+        foreach (var (type, path) in objects)
         {
-            await RemoveObjectsAsync(file.FileType, file.FilePath).ConfigureAwait(false);
+            await RemoveObjectsAsync(type, path).ConfigureAwait(false);
         }
 
-        await PostDelete(files, cancellationToken).ConfigureAwait(false);
+        await PostDelete(files, ct).ConfigureAwait(false);
     }
 
-    // Bulk deletes reject the whole operation when any file fails IsValidToDelete, before anything is removed.
+    // Every delete overload rejects the whole operation when any file fails IsValidToDelete, before anything changes.
     private void EnsureAllDeletable(IEnumerable<TFile> files)
     {
         foreach (var file in files)
@@ -481,19 +603,6 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         }
     }
 
-    /// <summary>Hard-deletes one file (even a soft-deleted one): the row, then its stored objects.</summary>
-    /// <param name="id">File id.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The purged entity.</returns>
-    public Task<TFile> Purge(long id, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-
-    /// <summary>Hard-deletes several files (even soft-deleted ones): the rows, then their stored objects.</summary>
-    /// <param name="ids">File ids.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The purged entities.</returns>
-    public Task<IEnumerable<TFile>> Purge(IEnumerable<long> ids, CancellationToken cancellationToken = default) =>
-        throw new NotImplementedException();
-
     #endregion
 
     private sealed record StoredObject(string Container, string Path);
@@ -501,13 +610,71 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     private sealed record StoredContent(
         string FilePath, long Size, string Extension, string OriginalFileName, string OriginalMediaType);
 
+    private sealed record PreparedUpload(string FileName, string Extension);
+
+    private static void EnsureDefined(FileType type)
+    {
+        if (!Enum.IsDefined(type))
+        {
+            throw new ApiException($"File type {(int)type} is not valid.", null, LogLevel.Warning, null,
+                HttpStatusCode.BadRequest, "INVALID_FILE_TYPE");
+        }
+    }
+
+    private Expression<Func<TFile, bool>> ActiveKey(long id) => f => f.FileId == id && f.IsEnabled;
+
+    // Read-only lookup of the database truth (never the tracked instance, which a caller may have edited).
     private async Task<TFile?> FindAsync(long id, CancellationToken ct) =>
-        await Repo.FirstOrDefaultAsync(GetKeyPredicate(id), flags: QueryFlags.DisableTracking, cancellationToken: ct)
+        await Repo.FirstOrDefaultAsync(ActiveKey(id), flags: QueryFlags.DisableTracking, cancellationToken: ct)
             .ConfigureAwait(false);
 
-    private async Task<TFile> GetTrackedAsync(long id, CancellationToken ct) =>
-        await Repo.FirstOrDefaultAsync(GetKeyPredicate(id), cancellationToken: ct).ConfigureAwait(false)
-        ?? throw NotFound(id);
+    // The tracked entity to mutate. Storage-owned and audit fields are restored from the database first, so unsaved
+    // edits made earlier on the same context can never be persisted or used to address another file's objects.
+    private async Task<TFile> LoadTrackedAsync(long id, bool includeDisabled, CancellationToken ct)
+    {
+        var key = includeDisabled ? GetKeyPredicate(id) : ActiveKey(id);
+        var tracked = await Repo.FirstOrDefaultAsync(key, cancellationToken: ct).ConfigureAwait(false) ?? throw NotFound(id);
+        var truth = await Repo.FirstOrDefaultAsync(key, flags: QueryFlags.DisableTracking, cancellationToken: ct)
+            .ConfigureAwait(false) ?? throw NotFound(id);
+        RestoreOwned(tracked, truth);
+        return tracked;
+    }
+
+    private async Task<List<TFile>> LoadManyAsync(Expression<Func<TFile, bool>> filter, CancellationToken ct)
+    {
+        var tracked = (await Repo.GetAsync(filter, cancellationToken: ct).ConfigureAwait(false)).ToList();
+        if (tracked.Count == 0)
+        {
+            return tracked;
+        }
+
+        var ids = tracked.Select(f => f.FileId).ToList();
+        var truth = (await Repo.GetAsync(f => ids.Contains(f.FileId), flags: QueryFlags.DisableTracking, cancellationToken: ct)
+            .ConfigureAwait(false)).ToDictionary(f => f.FileId);
+        foreach (var file in tracked)
+        {
+            if (truth.TryGetValue(file.FileId, out var fromDb))
+            {
+                RestoreOwned(file, fromDb);
+            }
+        }
+
+        return tracked;
+    }
+
+    private static void RestoreOwned(TFile target, TFile truth)
+    {
+        target.FilePath = truth.FilePath;
+        target.FileSize = truth.FileSize;
+        target.FileExtension = truth.FileExtension;
+        target.OriginalFileName = truth.OriginalFileName;
+        target.OriginalMediaType = truth.OriginalMediaType;
+        target.FileType = truth.FileType;
+        target.IsCompressed = truth.IsCompressed;
+        target.IsEnabled = truth.IsEnabled;
+        target.CreatedBy = truth.CreatedBy;
+        target.CreatedDate = truth.CreatedDate;
+    }
 
     private static ApiException NotFound(long id) =>
         new($"File {id} not found.", null, LogLevel.Warning, null, HttpStatusCode.NotFound, "FILE_NOT_FOUND");
@@ -521,9 +688,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         file.OriginalMediaType = stored.OriginalMediaType;
     }
 
-    // Validates the upload, stores the original (and thumbnails for images) and records every object it wrote.
-    private async Task<StoredContent> StoreContentAsync(FileType type, FileUpload content, List<StoredObject> stored,
-        CancellationToken ct)
+    // Validates the client's file name, extension and declared size before anything is stored.
+    private PreparedUpload Prepare(FileUpload content)
     {
         var fileName = SanitizeFileName(content.FileName);
         var extension = ValidateExtension(fileName);
@@ -532,9 +698,16 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             throw CountingStream.TooLarge(max);
         }
 
+        return new PreparedUpload(fileName, extension);
+    }
+
+    // Stores the original (and thumbnails for images) and records every object it wrote.
+    private async Task<StoredContent> StoreContentAsync(FileType type, FileUpload content, PreparedUpload prepared,
+        List<StoredObject> stored, CancellationToken ct)
+    {
         var container = type.ToString();
-        var path = $"{_timeProvider.GetUtcNow():yyyyMMdd}/{Guid.NewGuid():N}{extension}";
-        var writeOptions = new StorageWriteOptions { ContentType = ContentTypeMap.FromExtension(extension) };
+        var path = $"{_timeProvider.GetUtcNow():yyyyMMdd}/{Guid.NewGuid():N}{prepared.Extension}";
+        var writeOptions = new StorageWriteOptions { ContentType = ContentTypeMap.FromExtension(prepared.Extension) };
 
         await using var source = content.OpenReadStream();
         await using var counting = new CountingStream(source, _options.MaxFileSizeBytes);
@@ -545,21 +718,14 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             using var buffer = new MemoryStream();
             await counting.CopyToAsync(buffer, ct).ConfigureAwait(false);
             size = buffer.Length;
-            var bytes = buffer.ToArray();
-            var thumbnails = ThumbnailSizes.ToDictionary(s => s, s => ResizeToBytes(new MemoryStream(bytes), s, path));
+            var bytes = buffer.GetBuffer();
+            var length = (int)buffer.Length;
+            var thumbnails = ThumbnailSizes.ToDictionary(s => s, s => ResizeToBytes(new MemoryStream(bytes, 0, length, false), s, path));
 
-            using var original = new MemoryStream(bytes, writable: false);
+            using var original = new MemoryStream(bytes, 0, length, false);
             await _storageProvider.StoreAsync(original, path, writeOptions, container, ct).ConfigureAwait(false);
             stored.Add(new StoredObject(container, path));
-            foreach (var (thumbSize, data) in thumbnails)
-            {
-                var thumbPath = ThumbnailPath(thumbSize, path);
-                using var thumbStream = new MemoryStream(data, writable: false);
-                await _storageProvider.StoreAsync(thumbStream, thumbPath,
-                    new StorageWriteOptions { ContentType = ContentTypeMap.FromExtension(Path.GetExtension(thumbPath)) },
-                    container, ct).ConfigureAwait(false);
-                stored.Add(new StoredObject(container, thumbPath));
-            }
+            await StoreThumbnailsAsync(thumbnails, path, container, stored, ct).ConfigureAwait(false);
         }
         else
         {
@@ -574,18 +740,20 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             mediaType = mediaType[..500];
         }
 
-        return new StoredContent(path, size, extension, fileName, mediaType);
+        return new StoredContent(path, size, prepared.Extension, prepared.FileName, mediaType);
     }
 
-    private async Task StoreThumbnailsAsync(byte[] original, string filePath, List<StoredObject> created, CancellationToken ct)
+    private async Task StoreThumbnailsAsync(Dictionary<ImageSize, byte[]> thumbnails, string filePath, string container,
+        List<StoredObject> stored, CancellationToken ct)
     {
-        var container = FileType.Image.ToString();
-        foreach (var size in ThumbnailSizes)
+        foreach (var (size, data) in thumbnails)
         {
-            var data = ResizeToBytes(new MemoryStream(original), size, filePath);
             var thumbPath = ThumbnailPath(size, filePath);
-            await _storageProvider.StoreAsync(thumbPath, data, container).ConfigureAwait(false);
-            created.Add(new StoredObject(container, thumbPath));
+            using var stream = new MemoryStream(data, writable: false);
+            await _storageProvider.StoreAsync(stream, thumbPath,
+                new StorageWriteOptions { ContentType = ContentTypeMap.FromExtension(Path.GetExtension(thumbPath)) },
+                container, ct).ConfigureAwait(false);
+            stored.Add(new StoredObject(container, thumbPath));
         }
     }
 

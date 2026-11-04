@@ -12,13 +12,19 @@ public sealed class PublicUrlOptions
     /// <summary>Requested lifetime. <c>null</c> uses the provider default. Clamped to [1 minute, 7 days].</summary>
     public TimeSpan? ExpiresIn { get; set; }
 
-    /// <summary>Overrides the response content type.</summary>
+    /// <summary>
+    /// Ignored for the response type: the content type of a signed URL always comes from the object's own extension
+    /// (<c>ContentTypeMap</c>), never from the caller. The property is kept for source compatibility.
+    /// </summary>
     public string? ContentType { get; set; }
 
     /// <summary>File name offered to the browser; encoded per RFC 5987 in the response disposition.</summary>
     public string? DownloadFileName { get; set; }
 
-    /// <summary>Use <c>inline</c> instead of <c>attachment</c> when <see cref="DownloadFileName"/> is set.</summary>
+    /// <summary>
+    /// Ask for <c>inline</c> instead of <c>attachment</c>. Honoured only for types that are safe to render from a signed
+    /// URL (<c>ContentTypeMap.IsSafeToRenderSigned</c>); everything else is an attachment.
+    /// </summary>
     public bool Inline { get; set; }
 
     /// <summary>Returns the lifetime to use: the requested one, or <paramref name="defaultExpiry"/>, clamped.</summary>

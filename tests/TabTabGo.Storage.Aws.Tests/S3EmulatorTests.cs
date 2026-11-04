@@ -26,7 +26,7 @@ public sealed class LocalStackFixture : IAsyncLifetime
             return; // each test skips itself; a fixture cannot skip
         }
 
-        _container = new LocalStackBuilder().Build();
+        _container = new LocalStackBuilder("localstack/localstack:4.0.3").Build();
         await _container.StartAsync();
         Configuration = new S3Configuration
         {
@@ -39,7 +39,7 @@ public sealed class LocalStackFixture : IAsyncLifetime
             SecretKey = "test",
         };
         using var admin = (AmazonS3Client)S3ClientFactory.Create(Configuration);
-        await admin.PutBucketAsync(Bucket);
+        await admin.PutBucketAsync(new Amazon.S3.Model.PutBucketRequest { BucketName = Bucket, BucketRegion = S3Region.USEast1 });
     }
 
     public async ValueTask DisposeAsync()

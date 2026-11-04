@@ -18,6 +18,6 @@ public class StorageServiceOptions
     /// <summary>When not empty, only these extensions are accepted.</summary>
     public ISet<string> AllowedExtensions { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Largest accepted upload in bytes. <c>null</c> means no limit.</summary>
-    public long? MaxFileSizeBytes { get; set; }
+    /// <summary>Largest accepted upload in bytes. Defaults to 50 MiB; <c>null</c> means no limit.</summary>
+    public long? MaxFileSizeBytes { get; set; } = 50L * 1024 * 1024;
 }

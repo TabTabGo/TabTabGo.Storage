@@ -128,7 +128,7 @@ public class FileServiceReadTests : IDisposable
         Assert.Equal((160, 160), TestImages.SizeOf(ReadAll(result.Stream)));
         Assert.Equal("image/png", result.ContentType);
         Assert.Contains($"Image/ThumbMedium/{file.FilePath}", _h.Storage.Keys());
-        Assert.Contains(_h.Storage.Calls, c => c.StartsWith("Store(bytes):Image/ThumbMedium/", StringComparison.Ordinal));
+        Assert.Contains(_h.Storage.Calls, c => c.StartsWith("Store(stream):Image/ThumbMedium/", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -51,7 +51,7 @@ public class FileStorageProvider : StorageProvider
     public override string GetRootDirectory(string container = "unknown")
     {
         var name = NormalizeContainer(ProviderName, "GetRootDirectory", container);
-        var mapped = _pathService.PathSettings.TryGetPath(name, out var folder) ? folder : name.Replace('/', '_');
+        var mapped = _pathService.PathSettings.TryGetPath(name, out var folder) ? folder : name;
         // Configuration written on Windows uses backslashes; treat them as separators on every OS.
         return Path.Combine((_pathService.PathSettings.RootPath ?? string.Empty).Replace('\\', '/'), mapped.Replace('\\', '/'));
     }
@@ -198,7 +198,7 @@ public class FileStorageProvider : StorageProvider
         var name = NormalizeContainer(ProviderName, "GetPublicUrl", container);
         var folder = _pathService.PathSettings.TryGetPath(name, out var mapped) && !Path.IsPathRooted(mapped)
             ? mapped.Replace('\\', '/')
-            : name.Replace('/', '_');
+            : name;
         var segments = (folder + "/" + relative).Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Select(Uri.EscapeDataString);
         var url = baseUrl.TrimEnd('/') + "/" + string.Join('/', segments);
