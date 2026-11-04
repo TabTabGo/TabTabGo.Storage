@@ -133,12 +133,19 @@ jobs:
           declared="$(grep -oE '<Version>[^<]+' Directory.Build.props | head -1 | sed 's/<Version>//')"
           [ "$declared" = "$core" ] || { echo "::error::tag $core differs from Directory.Build.props Version $declared"; exit 1; }
 
-          if grep -E 'PackageVersion Include="TabTabGo\.' Directory.Packages.props | grep -qE -- '-local|local\.'; then
-            echo "::error::a -local Core version is referenced; local feeds must not be released"; exit 1
+          if [ -n "${TabTabGoCoreVersion:-}" ]; then echo "::error::TabTabGoCoreVersion must not be set in a release run"; exit 1; fi
+          core_range="$(grep -oE '<TabTabGoCoreVersion[^>]*>[^<]+' Directory.Packages.props | head -1 | sed 's/.*>//')"
+          [ -n "$core_range" ] || { echo "::error::no default Core version range found in Directory.Packages.props"; exit 1; }
+          if printf '%s' "$core_range" | grep -qE -- 'local'; then
+            echo "::error::a -local Core version is the default; local feeds must not be released"; exit 1
+          fi
+          # Every PackageVersion line for TabTabGo.* must use the property (no hard-coded floating pin).
+          if grep -E 'PackageVersion Include="TabTabGo\.' Directory.Packages.props | grep -vq 'Version="\$(TabTabGoCoreVersion)"'; then
+            echo "::error::TabTabGo.* packages must take their version from TabTabGoCoreVersion"; exit 1
           fi
           prerelease=false
           if [[ "$version" == *-* ]]; then prerelease=true; fi
-          if [ "$prerelease" = "false" ] && grep -E 'PackageVersion Include="TabTabGo\.' Directory.Packages.props | grep -qE 'Version="\[?[0-9]+\.[0-9]+\.[0-9]+-'; then
+          if [ "$prerelease" = "false" ] && printf '%s' "$core_range" | grep -qE '[0-9]+\.[0-9]+\.[0-9]+-'; then
             echo "::error::a stable tag must not depend on a pre-release TabTabGo.Core"; exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"

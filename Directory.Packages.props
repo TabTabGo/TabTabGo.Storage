@@ -5,10 +5,17 @@
     <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
 
-  <ItemGroup Label="TabTabGo Core (bounded range: a Storage line never floats onto another Core major)">
-    <PackageVersion Include="TabTabGo.Core" Version="[8.0.1, 9.0.0)" />
-    <PackageVersion Include="TabTabGo.Core.Services" Version="[8.0.1, 9.0.0)" />
-    <PackageVersion Include="TabTabGo.Data.EF" Version="[8.0.1, 9.0.0)" />
+  <PropertyGroup>
+    <!-- Bounded range: a Storage line never floats onto another Core major. A local build overrides it with the
+         environment variable or -p:TabTabGoCoreVersion=8.0.1-local.<sha> (see scripts/local-core.py). Never committed
+         with a -local value; release.yml checks this default. -->
+    <TabTabGoCoreVersion Condition="'$(TabTabGoCoreVersion)' == ''">[8.0.1, 9.0.0)</TabTabGoCoreVersion>
+  </PropertyGroup>
+
+  <ItemGroup Label="TabTabGo Core">
+    <PackageVersion Include="TabTabGo.Core" Version="$(TabTabGoCoreVersion)" />
+    <PackageVersion Include="TabTabGo.Core.Services" Version="$(TabTabGoCoreVersion)" />
+    <PackageVersion Include="TabTabGo.Data.EF" Version="$(TabTabGoCoreVersion)" />
   </ItemGroup>
 
   <ItemGroup Label="Microsoft.Extensions / EF Core (v8 line)">

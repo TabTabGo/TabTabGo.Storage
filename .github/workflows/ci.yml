@@ -109,10 +109,16 @@ jobs:
 
       - name: Scan the commits of this change
         run: |
+          # Never scan the whole history: public history holds already-reported (owner-rotated) leaks. A new branch or a
+          # manual run scans what this branch adds on top of master.
           zeros='0000000000000000000000000000000000000000'
+          base="$(git merge-base origin/master "$HEAD_SHA")"
           case "$EVENT_NAME" in
             pull_request) range="${PR_BASE_SHA}..${HEAD_SHA}" ;;
-            push) if [ "$PUSH_BEFORE_SHA" = "$zeros" ] || [ -z "$PUSH_BEFORE_SHA" ]; then range="${HEAD_SHA}"; else range="${PUSH_BEFORE_SHA}..${HEAD_SHA}"; fi ;;
-            *) range="${HEAD_SHA}" ;;
+            push) if [ "$PUSH_BEFORE_SHA" = "$zeros" ] || [ -z "$PUSH_BEFORE_SHA" ]; then range="${base}..${HEAD_SHA}"; else range="${PUSH_BEFORE_SHA}..${HEAD_SHA}"; fi ;;
+            *) range="${base}..${HEAD_SHA}" ;;
           esac
+          echo "scanning ${range}"
           ./gitleaks git . --no-banner --redact --exit-code 1 --log-opts="$range"
+          # TODO(owner, after the keys are rotated): add a .gitleaksignore with the historical fingerprints only if a
+          # range scan ever needs to cross them. Do not add it before rotation is confirmed.
