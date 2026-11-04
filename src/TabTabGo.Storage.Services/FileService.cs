@@ -235,6 +235,13 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     {
         ArgumentNullException.ThrowIfNull(content);
         var file = await GetTrackedAsync(id, cancellationToken).ConfigureAwait(false);
+        if (!IsValidToUpdate(file, out var error))
+        {
+            throw new ApiException($"Failed to update file. {error}", null, LogLevel.Warning, 4001,
+                HttpStatusCode.BadRequest, "FILE_INVALID");
+        }
+
+        await PreUpdate(file, file, cancellationToken).ConfigureAwait(false);
         var oldPath = file.FilePath;
         var oldType = file.FileType;
 
@@ -418,6 +425,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         var idList = ids.ToList();
         var files = (await Repo.GetAsync(f => idList.Contains(f.FileId), cancellationToken: cancellationToken)
             .ConfigureAwait(false)).ToList();
+        EnsureAllDeletable(files);
         await PreDelete(files, cancellationToken).ConfigureAwait(false);
         foreach (var file in files)
         {
@@ -439,6 +447,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     {
         ArgumentNullException.ThrowIfNull(query);
         var files = (await Repo.GetAsync(query, cancellationToken: cancellationToken).ConfigureAwait(false)).ToList();
+        EnsureAllDeletable(files);
+        await PreDelete(files, cancellationToken).ConfigureAwait(false);
         foreach (var file in files)
         {
             Repo.Delete(file);
@@ -449,6 +459,21 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         foreach (var file in files)
         {
             await RemoveObjectsAsync(file.FileType, file.FilePath).ConfigureAwait(false);
+        }
+
+        await PostDelete(files, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Bulk deletes reject the whole operation when any file fails IsValidToDelete, before anything is removed.
+    private void EnsureAllDeletable(IEnumerable<TFile> files)
+    {
+        foreach (var file in files)
+        {
+            if (!IsValidToDelete(file, out var error))
+            {
+                throw new ApiException($"Can't delete file {file.FileId}. {error}", null, LogLevel.Warning, null,
+                    HttpStatusCode.BadRequest, "FILE_DELETE_REJECTED");
+            }
         }
     }
 

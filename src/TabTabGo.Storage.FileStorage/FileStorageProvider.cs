@@ -52,7 +52,8 @@ public class FileStorageProvider : StorageProvider
     {
         var name = NormalizeContainer(ProviderName, "GetRootDirectory", container);
         var mapped = _pathService.PathSettings.TryGetPath(name, out var folder) ? folder : name.Replace('/', '_');
-        return Path.Combine(_pathService.PathSettings.RootPath ?? string.Empty, mapped);
+        // Configuration written on Windows uses backslashes; treat them as separators on every OS.
+        return Path.Combine((_pathService.PathSettings.RootPath ?? string.Empty).Replace('\\', '/'), mapped.Replace('\\', '/'));
     }
 
     /// <inheritdoc />

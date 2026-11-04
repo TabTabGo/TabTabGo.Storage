@@ -11,6 +11,7 @@ public class StorageServiceOptions
         new[]
         {
             ".html", ".htm", ".svg", ".js", ".mjs", ".exe", ".dll", ".bat", ".cmd", ".ps1", ".sh", ".php", ".aspx", ".jsp",
+            ".xml", ".xhtml", ".xht", ".xsl", ".xslt", ".svgz", ".shtml", ".hta",
         },
         StringComparer.OrdinalIgnoreCase);
 

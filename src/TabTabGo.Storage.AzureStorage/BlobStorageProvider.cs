@@ -193,7 +193,7 @@ public class BlobStorageProvider : StorageProvider
 
     /// <summary>Legacy: returns the absolute SAS URL as a string.</summary>
     /// <param name="filePath">Relative object path.</param>
-    /// <param name="mediaType">Content type override; ignored when empty.</param>
+    /// <param name="mediaType">Ignored: the content type always comes from the object's extension.</param>
     /// <param name="fileName">Download file name; ignored when empty.</param>
     /// <param name="expiryDays">Ignored; the configured default SAS lifetime applies.</param>
     /// <param name="container">Container name.</param>
@@ -202,9 +202,9 @@ public class BlobStorageProvider : StorageProvider
     public override async Task<string?> GetPublicPath(string filePath, string mediaType, string fileName,
         int expiryDays = 20, string container = "unknown")
     {
+        // The caller's mediaType is deliberately ignored: a client-chosen content type must not reach the SAS.
         var options = new PublicUrlOptions
         {
-            ContentType = string.IsNullOrWhiteSpace(mediaType) ? null : mediaType,
             DownloadFileName = string.IsNullOrWhiteSpace(fileName) ? null : fileName,
         };
         var uri = await GetPublicUrlAsync(filePath, options, container).ConfigureAwait(false);
@@ -219,16 +219,17 @@ public class BlobStorageProvider : StorageProvider
         ct.ThrowIfCancellationRequested();
         var (containerClient, blob, relative) = GetBlob("GetPublicUrl", container, filePath);
         var expiresOn = DateTimeOffset.UtcNow.Add(options.GetEffectiveExpiry(_options.DefaultSasExpiry));
+        // Only a safe-to-render type may be overridden; active content is always an attachment.
+        var contentType = ContentTypeMap.ChooseResponseType(options.ContentType, relative);
+        var inline = options.Inline && ContentTypeMap.IsSafeToRender(contentType);
         var builder = new BlobSasBuilder
         {
             BlobContainerName = containerClient.Name,
             BlobName = blob.Name,
             Resource = "b",
             ExpiresOn = expiresOn,
-            ContentType = options.ContentType,
-            ContentDisposition = options.DownloadFileName is null
-                ? null
-                : ContentDispositionFormatter.Format(options.DownloadFileName, options.Inline),
+            ContentType = contentType,
+            ContentDisposition = ContentDispositionFormatter.Format(options.DownloadFileName, inline),
         };
         builder.SetPermissions(BlobSasPermissions.Read);
 

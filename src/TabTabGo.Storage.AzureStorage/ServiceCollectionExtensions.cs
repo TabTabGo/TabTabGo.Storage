@@ -3,6 +3,7 @@ using Azure.Storage.Blobs;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace TabTabGo.Storage.AzureStorage;
@@ -68,7 +69,12 @@ public static class ServiceCollectionExtensions
         services.AddOptions<AzureBlobStorageOptions>().ValidateOnStart();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IPostConfigureOptions<AzureBlobStorageOptions>, LegacyConnectionStringPostConfigure>());
         services.TryAddSingleton(sp => AzureBlobClientFactory.Create(sp.GetRequiredService<IOptions<AzureBlobStorageOptions>>().Value));
-        services.TryAddSingleton<BlobStorageProvider>();
+        // Explicit factory: the class has a second (obsolete) constructor that is also satisfiable once an
+        // IConfiguration is registered, which makes constructor selection ambiguous.
+        services.TryAddSingleton(sp => new BlobStorageProvider(
+            sp.GetRequiredService<BlobServiceClient>(),
+            sp.GetRequiredService<IOptions<AzureBlobStorageOptions>>(),
+            sp.GetRequiredService<ILogger<BlobStorageProvider>>()));
         services.TryAddSingleton<IStorageProvider>(sp => sp.GetRequiredService<BlobStorageProvider>());
         return services;
     }

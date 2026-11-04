@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Shared test helpers; not a test project and never packed. -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <IsTestProject>false</IsTestProject>
+    <RootNamespace>TabTabGo.Storage.TestKit</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.extensibility.core" />
+    <PackageReference Include="xunit.v3.assert" />
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="System.IO.Hashing" />
+    <PackageReference Include="TabTabGo.Data.EF" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TabTabGo.Storage\TabTabGo.Storage.csproj" />
+    <ProjectReference Include="..\..\src\TabTabGo.Storage.Data.EF\TabTabGo.Storage.Data.EF.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Golden\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

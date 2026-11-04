@@ -59,7 +59,7 @@ public class PathService : IPathService
             var full = Path.GetFullPath(ResolvePath(candidate));
             var underWebRoot = !string.IsNullOrEmpty(webRoot) &&
                                full.StartsWith(Path.GetFullPath(webRoot), StringComparison.OrdinalIgnoreCase);
-            var underWwwroot = full.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            var underWwwroot = full.Split('/', '\\')
                 .Any(s => string.Equals(s, "wwwroot", StringComparison.OrdinalIgnoreCase));
             if (underWebRoot || underWwwroot)
             {

@@ -229,7 +229,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
 
     /// <summary>Legacy: returns a presigned URL using the configured default lifetime.</summary>
     /// <param name="filePath">Relative object path.</param>
-    /// <param name="mediaType">Content type override; ignored when empty.</param>
+    /// <param name="mediaType">Ignored: the content type always comes from the object's extension.</param>
     /// <param name="fileName">Download file name; ignored when empty.</param>
     /// <param name="expiryDays">Ignored; the configured <c>ExpirationMinutes</c> applies.</param>
     /// <param name="container">Container name.</param>
@@ -238,9 +238,9 @@ public class S3StorageProvider : StorageProvider, IDisposable
     public override async Task<string?> GetPublicPath(string filePath, string mediaType, string fileName,
         int expiryDays = 20, string container = "unknown")
     {
+        // The caller's mediaType is deliberately ignored: a client-chosen content type must not reach the signed URL.
         var options = new PublicUrlOptions
         {
-            ContentType = string.IsNullOrWhiteSpace(mediaType) ? null : mediaType,
             DownloadFileName = string.IsNullOrWhiteSpace(fileName) ? null : fileName,
         };
         var uri = await GetPublicUrlAsync(filePath, options, container).ConfigureAwait(false);
@@ -266,16 +266,15 @@ public class S3StorageProvider : StorageProvider, IDisposable
                 : Protocol.HTTPS,
         };
 
-        if (options.ContentType is not null || options.DownloadFileName is not null)
+        // Only a safe-to-render type may be overridden; anything else falls back to the extension's type, and
+        // active content is always an attachment.
+        var contentType = ContentTypeMap.ChooseResponseType(options.ContentType, relative);
+        var inline = options.Inline && ContentTypeMap.IsSafeToRender(contentType);
+        request.ResponseHeaderOverrides = new ResponseHeaderOverrides
         {
-            request.ResponseHeaderOverrides = new ResponseHeaderOverrides
-            {
-                ContentType = options.ContentType,
-                ContentDisposition = options.DownloadFileName is null
-                    ? null
-                    : ContentDispositionFormatter.Format(options.DownloadFileName, options.Inline),
-            };
-        }
+            ContentType = contentType,
+            ContentDisposition = ContentDispositionFormatter.Format(options.DownloadFileName, inline),
+        };
 
         try
         {

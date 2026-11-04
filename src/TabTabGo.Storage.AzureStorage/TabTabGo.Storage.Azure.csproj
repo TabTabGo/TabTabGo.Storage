@@ -20,6 +20,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="TabTabGo.Storage.Azure.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
   </ItemGroup>
 

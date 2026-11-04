@@ -20,18 +20,12 @@ public static class ContentTypeMap
         ["bmp"] = "image/bmp",
         ["ico"] = "image/x-icon",
         ["webp"] = "image/webp",
-        ["svg"] = "image/svg+xml",
         ["tif"] = "image/tiff",
         ["tiff"] = "image/tiff",
         ["pdf"] = "application/pdf",
         ["txt"] = "text/plain",
         ["csv"] = "text/csv",
-        ["html"] = "text/html",
-        ["htm"] = "text/html",
-        ["js"] = "text/javascript",
-        ["mjs"] = "text/javascript",
         ["json"] = "application/json",
-        ["xml"] = "application/xml",
         ["zip"] = "application/zip",
         ["doc"] = "application/msword",
         ["docx"] = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -48,6 +42,55 @@ public static class ContentTypeMap
         ["mov"] = "video/quicktime",
         ["avi"] = "video/x-msvideo",
     };
+
+    /// <summary>
+    /// Extensions a browser can execute or render with script (HTML, SVG, XML/XSLT, JavaScript). They are never mapped
+    /// to their native media type: they are served as <see cref="DefaultContentType"/> and only as attachments.
+    /// </summary>
+    public static readonly IReadOnlySet<string> ActiveContentExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "html", "htm", "xhtml", "xht", "svg", "svgz", "xml", "xsl", "xslt", "js", "mjs", "hta", "shtml",
+    };
+
+    /// <summary>Returns whether the extension is script-capable content (see <see cref="ActiveContentExtensions"/>).</summary>
+    /// <param name="extension">Extension with or without the dot.</param>
+    /// <returns><c>true</c> for active content.</returns>
+    public static bool IsActiveContent(string? extension) =>
+        !string.IsNullOrWhiteSpace(extension) && ActiveContentExtensions.Contains(extension.TrimStart('.'));
+
+    /// <summary>
+    /// Returns whether a media type is safe to render inline: images (not SVG), PDF, plain text, audio and video.
+    /// </summary>
+    /// <param name="contentType">Media type to test.</param>
+    /// <returns><c>true</c> when safe to render inline.</returns>
+    public static bool IsSafeToRender(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return false;
+        }
+
+        var type = contentType.Split(';')[0].Trim().ToLowerInvariant();
+        if (type.Contains("svg", StringComparison.Ordinal) || type.Contains("xml", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return type.StartsWith("image/", StringComparison.Ordinal) || type == "application/pdf" || type == "text/plain" ||
+               type.StartsWith("audio/", StringComparison.Ordinal) || type.StartsWith("video/", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Chooses the response content type for a download: the requested one only when it is safe to render, otherwise
+    /// the type derived from the object's extension.
+    /// </summary>
+    /// <param name="requested">Caller-requested content type, if any.</param>
+    /// <param name="objectPath">Object path whose extension is the fallback.</param>
+    /// <returns>A safe content type.</returns>
+    public static string ChooseResponseType(string? requested, string objectPath) =>
+        !IsActiveContent(Path.GetExtension(objectPath)) && IsSafeToRender(requested)
+            ? requested!
+            : FromExtension(Path.GetExtension(objectPath));
 
     /// <summary>Looks up the media type for an extension.</summary>
     /// <param name="extension">Extension with or without the leading dot.</param>

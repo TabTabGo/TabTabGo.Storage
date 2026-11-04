@@ -8,7 +8,7 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <!-- xunit.v3 test projects are executables. -->
     <OutputType>Exe</OutputType>
-    <NoWarn>$(NoWarn);CS1591;CS0618</NoWarn>
+    <NoWarn>$(NoWarn);CS1591;CS0618;CS0672;xUnit1051</NoWarn>
   </PropertyGroup>
 
 </Project>
