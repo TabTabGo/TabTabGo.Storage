@@ -181,6 +181,11 @@ jobs:
       - name: Build (warnings are errors)
         run: dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
 
+      - name: API compatibility against 6.0.8.4
+        run: |
+          dotnet tool restore
+          python3 scripts/apicompat.py
+
       - name: Test (emulator tests included; Docker is available on this runner)
         run: dotnet test TabTabGo.Storage.sln -c Release --no-build --collect:"XPlat Code Coverage" --results-directory coverage
 

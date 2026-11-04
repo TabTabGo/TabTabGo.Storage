@@ -48,6 +48,12 @@ jobs:
       - name: Build (warnings are errors)
         run: dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
 
+      - name: API compatibility against the published 6.0.8.4 libraries (every break must cite a spec 6.4 row)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          dotnet tool restore
+          python3 scripts/apicompat.py
+
       - name: Test with coverage
         run: dotnet test TabTabGo.Storage.sln -c Release --no-build --collect:"XPlat Code Coverage" --results-directory coverage
 

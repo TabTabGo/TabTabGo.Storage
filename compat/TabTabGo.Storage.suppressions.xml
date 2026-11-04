@@ -1,0 +1,39 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- https://learn.microsoft.com/en-us/dotnet/fundamentals/package-validation/diagnostic-ids -->
+<Suppressions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <!-- SB4: IFile.FormFile / File.FormFile removed; upload content is a FileUpload (ADR 0004) -->
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:TabTabGo.Storage.Entities.File.get_FormFile</Target>
+  </Suppression>
+  <!-- SB4: IFile.FormFile / File.FormFile removed; upload content is a FileUpload (ADR 0004) -->
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:TabTabGo.Storage.Entities.File.set_FormFile(Microsoft.AspNetCore.Http.IFormFile)</Target>
+  </Suppression>
+  <!-- SB4: IFile.FormFile / File.FormFile removed; upload content is a FileUpload (ADR 0004) -->
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:TabTabGo.Storage.Entities.IFile.get_FormFile</Target>
+  </Suppression>
+  <!-- SB4: IFile.FormFile / File.FormFile removed; upload content is a FileUpload (ADR 0004) -->
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:TabTabGo.Storage.Entities.IFile.set_FormFile(Microsoft.AspNetCore.Http.IFormFile)</Target>
+  </Suppression>
+  <!-- SB22: IFileService<TFile> gained Upload / Replace / ListAsync (and Delete(query) stays); implementers must add them -->
+  <Suppression>
+    <DiagnosticId>CP0006</DiagnosticId>
+    <Target>M:TabTabGo.Storage.Services.IFileService`1.ListAsync(TabTabGo.Storage.Models.FileListQuery,System.Linq.Expressions.Expression{System.Func{`0,System.Boolean}},System.Threading.CancellationToken)</Target>
+  </Suppression>
+  <!-- SB22: IFileService<TFile> gained Upload / Replace / ListAsync (and Delete(query) stays); implementers must add them -->
+  <Suppression>
+    <DiagnosticId>CP0006</DiagnosticId>
+    <Target>M:TabTabGo.Storage.Services.IFileService`1.Replace(System.Int64,TabTabGo.Storage.Models.FileUpload,System.Threading.CancellationToken)</Target>
+  </Suppression>
+  <!-- SB22: IFileService<TFile> gained Upload / Replace / ListAsync (and Delete(query) stays); implementers must add them -->
+  <Suppression>
+    <DiagnosticId>CP0006</DiagnosticId>
+    <Target>M:TabTabGo.Storage.Services.IFileService`1.Upload(`0,TabTabGo.Storage.Models.FileUpload,System.Threading.CancellationToken)</Target>
+  </Suppression>
+</Suppressions>
