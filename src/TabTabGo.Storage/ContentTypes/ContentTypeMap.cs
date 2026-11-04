@@ -58,39 +58,32 @@ public static class ContentTypeMap
     public static bool IsActiveContent(string? extension) =>
         !string.IsNullOrWhiteSpace(extension) && ActiveContentExtensions.Contains(extension.TrimStart('.'));
 
+    private static readonly HashSet<string> RenderSafeTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/png", "image/jpeg", "image/gif", "image/bmp", "image/x-icon", "image/webp", "image/tiff",
+        "application/pdf", "text/plain",
+        "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4",
+        "video/mp4", "video/webm", "video/quicktime", "video/x-msvideo",
+    };
+
     /// <summary>
-    /// Returns whether a media type is safe to render inline: images (not SVG), PDF, plain text, audio and video.
+    /// Returns whether a media type is on the fixed allow-list of types safe to render inline. The match is exact:
+    /// parameters, lists (<c>a,b</c>), whitespace, quotes and control characters never match.
     /// </summary>
     /// <param name="contentType">Media type to test.</param>
-    /// <returns><c>true</c> when safe to render inline.</returns>
-    public static bool IsSafeToRender(string? contentType)
-    {
-        if (string.IsNullOrWhiteSpace(contentType))
-        {
-            return false;
-        }
-
-        var type = contentType.Split(';')[0].Trim().ToLowerInvariant();
-        if (type.Contains("svg", StringComparison.Ordinal) || type.Contains("xml", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return type.StartsWith("image/", StringComparison.Ordinal) || type == "application/pdf" || type == "text/plain" ||
-               type.StartsWith("audio/", StringComparison.Ordinal) || type.StartsWith("video/", StringComparison.Ordinal);
-    }
+    /// <returns><c>true</c> when it is exactly one of the allow-listed types.</returns>
+    public static bool IsSafeToRender(string? contentType) =>
+        !string.IsNullOrEmpty(contentType) && RenderSafeTypes.Contains(contentType);
 
     /// <summary>
-    /// Chooses the response content type for a download: the requested one only when it is safe to render, otherwise
-    /// the type derived from the object's extension.
+    /// Chooses the response content type for a download. The caller's value is never echoed: the result is always the
+    /// type derived from the object's extension, so a requested override only matters if it equals that type.
     /// </summary>
-    /// <param name="requested">Caller-requested content type, if any.</param>
-    /// <param name="objectPath">Object path whose extension is the fallback.</param>
-    /// <returns>A safe content type.</returns>
+    /// <param name="requested">Caller-requested content type (ignored unless identical to the derived type).</param>
+    /// <param name="objectPath">Object path whose extension decides the type.</param>
+    /// <returns>A fixed, canonical content type.</returns>
     public static string ChooseResponseType(string? requested, string objectPath) =>
-        !IsActiveContent(Path.GetExtension(objectPath)) && IsSafeToRender(requested)
-            ? requested!
-            : FromExtension(Path.GetExtension(objectPath));
+        FromExtension(Path.GetExtension(objectPath));
 
     /// <summary>Looks up the media type for an extension.</summary>
     /// <param name="extension">Extension with or without the leading dot.</param>

@@ -244,6 +244,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         await PreUpdate(file, file, cancellationToken).ConfigureAwait(false);
         var oldPath = file.FilePath;
         var oldType = file.FileType;
+        var previous = new StoredContent(file.FilePath, file.FileSize ?? 0, file.FileExtension, file.OriginalFileName,
+            file.OriginalMediaType);
 
         var stored = new List<StoredObject>();
         try
@@ -255,6 +257,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         }
         catch
         {
+            // The row still points at the old objects; keep the in-memory entity consistent with that.
+            ApplyStorageFields(file, previous);
             await CleanupAsync(stored).ConfigureAwait(false);
             throw;
         }

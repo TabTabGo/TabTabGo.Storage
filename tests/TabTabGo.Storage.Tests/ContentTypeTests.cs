@@ -49,29 +49,45 @@ public class ContentTypeMapTests
 
     [Theory]
     [InlineData("image/png", true)]
-    [InlineData("image/jpeg; charset=x", true)]
+    [InlineData("IMAGE/PNG", true)]
     [InlineData("application/pdf", true)]
     [InlineData("text/plain", true)]
     [InlineData("audio/mpeg", true)]
     [InlineData("video/mp4", true)]
+    [InlineData("image/jpeg; charset=x", false)]
+    [InlineData("image/png;charset=utf-8", false)]
+    [InlineData("image/png,text/html", false)]
+    [InlineData("image/png\r\nX-Evil: 1", false)]
+    [InlineData("image/png\"", false)]
+    [InlineData(" image/png", false)]
+    [InlineData("image/png ", false)]
     [InlineData("image/svg+xml", false)]
     [InlineData("text/html", false)]
     [InlineData("application/xml", false)]
     [InlineData("application/octet-stream", false)]
     [InlineData("text/javascript", false)]
+    [InlineData("image/", false)]
+    [InlineData("image/unknown", false)]
     [InlineData("", false)]
     [InlineData(null, false)]
-    public void IsSafeToRender_AllowListOnly(string? contentType, bool expected) =>
+    public void IsSafeToRender_ExactAllowListOnly(string? contentType, bool expected) =>
         Assert.Equal(expected, ContentTypeMap.IsSafeToRender(contentType));
 
+    // X-5: the caller's string is never echoed; the extension decides.
     [Theory]
     [InlineData("image/png", "a/b.png", "image/png")]
     [InlineData("text/html", "a/b.png", "image/png")]
+    [InlineData("image/png,text/html", "a/b.png", "image/png")]
+    [InlineData("image/png\r\nX-Evil: 1", "a/b.png", "image/png")]
+    [InlineData("image/png\"", "a/b.png", "image/png")]
+    [InlineData("image/png;charset=utf-8", "a/b.png", "image/png")]
+    [InlineData("IMAGE/PNG", "a/b.png", "image/png")]
+    [InlineData("image/svg+xml", "a/b.png", "image/png")]
     [InlineData(null, "a/b.pdf", "application/pdf")]
     [InlineData("image/png", "a/evil.html", "application/octet-stream")]
     [InlineData("image/png", "a/evil.svg", "application/octet-stream")]
     [InlineData("text/html", "a/noext", "application/octet-stream")]
-    public void ChooseResponseType_RequestedOnlyWhenSafe(string? requested, string path, string expected) =>
+    public void ChooseResponseType_AlwaysTheExtensionType(string? requested, string path, string expected) =>
         Assert.Equal(expected, ContentTypeMap.ChooseResponseType(requested, path));
 
     [Fact]

@@ -219,7 +219,14 @@ internal static class FileMetadata<TFile>
             return;
         }
 
-        property.SetValue(target, node.Deserialize(property.PropertyType, JsonOptions));
+        try
+        {
+            property.SetValue(target, node.Deserialize(property.PropertyType, JsonOptions));
+        }
+        catch (JsonException e)
+        {
+            throw Invalid(name, e);
+        }
     }
 
     private static string ReadString(JsonNode node, string name)
