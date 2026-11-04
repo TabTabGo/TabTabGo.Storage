@@ -245,6 +245,11 @@ public class FileStorageProvider : StorageProvider
         ct.ThrowIfCancellationRequested();
         var (full, relative) = Resolve("Store", container, filePath);
         var directory = Path.GetDirectoryName(full)!;
+        if (!overwrite)
+        {
+            return await WriteExclusiveAsync(content, full, relative, container, ct).ConfigureAwait(false);
+        }
+
         var temp = Path.Combine(directory, "." + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
@@ -260,7 +265,28 @@ public class FileStorageProvider : StorageProvider
             File.Move(temp, full, overwrite);
             return relative;
         }
-        catch (IOException) when (!overwrite && File.Exists(full))
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            throw Failure("Store", container, relative, e);
+        }
+        finally
+        {
+            TryDelete(temp);
+        }
+    }
+
+    // No-overwrite stores claim the name with an exclusive create, which exactly one concurrent writer can win on every
+    // OS (File.Move without overwrite is not atomic on every platform). A failed write removes the partial file.
+    private async Task<string> WriteExclusiveAsync(Stream content, string full, string relative, string container,
+        CancellationToken ct)
+    {
+        FileStream target;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            target = new FileStream(full, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous);
+        }
+        catch (IOException) when (File.Exists(full))
         {
             throw new StorageException("Object already exists.", ProviderName, "Store", container, relative,
                 HttpStatusCode.Conflict, code: "STORAGE_OBJECT_EXISTS");
@@ -269,9 +295,25 @@ public class FileStorageProvider : StorageProvider
         {
             throw Failure("Store", container, relative, e);
         }
-        finally
+
+        try
         {
-            TryDelete(temp);
+            await using (target.ConfigureAwait(false))
+            {
+                await content.CopyToAsync(target, ct).ConfigureAwait(false);
+            }
+
+            return relative;
+        }
+        catch (Exception e)
+        {
+            TryDelete(full);
+            if (e is IOException or UnauthorizedAccessException)
+            {
+                throw Failure("Store", container, relative, e);
+            }
+
+            throw;
         }
     }
 
@@ -290,7 +332,42 @@ public class FileStorageProvider : StorageProvider
                 container, null, HttpStatusCode.BadRequest, code: "STORAGE_INVALID_PATH");
         }
 
+        // A symbolic link planted inside the container must not lead out of it: compare the real locations.
+        var realRoot = RealPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
+                       Path.DirectorySeparatorChar;
+        if (!RealPath(full).StartsWith(realRoot, comparison))
+        {
+            throw new StorageException("The storage path escapes the container root.", ProviderName, operation,
+                container, null, HttpStatusCode.BadRequest, code: "STORAGE_INVALID_PATH");
+        }
+
         return (full, relative);
+    }
+
+    // Resolves every existing component that is a symbolic link (left to right), like realpath().
+    private static string RealPath(string fullPath)
+    {
+        var root = Path.GetPathRoot(fullPath) ?? string.Empty;
+        var current = root;
+        foreach (var segment in fullPath[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            try
+            {
+                FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+                var target = info.ResolveLinkTarget(returnFinalTarget: true);
+                if (target is not null)
+                {
+                    current = target.FullName;
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Not a readable link: treat as an ordinary path component.
+            }
+        }
+
+        return current;
     }
 
     private StorageException Failure(string operation, string container, string? filePath, Exception inner)

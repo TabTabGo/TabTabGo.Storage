@@ -20,7 +20,7 @@ internal sealed class S3ResponseStream : Stream
 
     public override bool CanWrite => false;
 
-    public override long Length => _response.ContentLength;
+    public override long Length => _inner.CanSeek ? _inner.Length : _response.ContentLength;
 
     public override long Position
     {

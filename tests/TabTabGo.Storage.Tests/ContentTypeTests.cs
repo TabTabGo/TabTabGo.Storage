@@ -149,10 +149,10 @@ public class ContentDispositionFormatterTests
     {
         var value = ContentDispositionFormatter.Format("invoice\u202Egnp.exe\u2066x\u2069\u200E.pdf");
 
-        Assert.DoesNotContain("\u202E", value);
-        Assert.DoesNotContain("\u2066", value);
-        Assert.DoesNotContain("\u2069", value);
-        Assert.DoesNotContain("%E2%80%AE", value);
+        Assert.DoesNotContain("\u202E", value, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u2066", value, StringComparison.Ordinal);
+        Assert.DoesNotContain("\u2069", value, StringComparison.Ordinal);
+        Assert.DoesNotContain("%E2%80%AE", value, StringComparison.Ordinal);
         Assert.Contains("filename=\"invoicegnp.exex.pdf\"", value);
     }
 

@@ -30,6 +30,15 @@ public static class ContentDispositionFormatter
         return $"{disposition}; filename=\"{ascii}\"; filename*=UTF-8''{EncodeRfc5987(clean)}";
     }
 
+    /// <summary>
+    /// Returns whether a character is a bidirectional control (U+202A-202E, U+2066-2069, U+200E/F, U+061C). They let a
+    /// name such as <c>photo[RLO]gnp.exe</c> display as <c>photoexe.png</c> and are removed from stored and served names.
+    /// </summary>
+    /// <param name="c">Character to test.</param>
+    /// <returns><c>true</c> for a bidi control character.</returns>
+    public static bool IsBidiControl(char c) =>
+        c is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069' or '\u200E' or '\u200F' or '\u061C';
+
     private static string Clean(string? fileName)
     {
         if (string.IsNullOrEmpty(fileName))
@@ -42,7 +51,7 @@ public static class ContentDispositionFormatter
         var builder = new StringBuilder(name.Length);
         foreach (var c in name)
         {
-            if (c < ' ' || c == '\u007f' || c == '"')
+            if (c < ' ' || c == '\u007f' || c == '"' || IsBidiControl(c))
             {
                 continue;
             }

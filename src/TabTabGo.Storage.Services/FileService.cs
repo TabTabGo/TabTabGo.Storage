@@ -802,7 +802,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         var builder = new StringBuilder(unified.Length);
         foreach (var c in unified)
         {
-            if (c >= ' ' && c != '\u007f')
+            if (c >= ' ' && c != '\u007f' && !ContentDispositionFormatter.IsBidiControl(c))
             {
                 builder.Append(c);
             }
