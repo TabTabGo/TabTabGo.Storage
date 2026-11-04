@@ -10,7 +10,9 @@ as SURVIVED (an equivalent mutant must be explained in the table, never hidden).
 (TabTabGoCoreVersion when the local Core feed is used) and Docker for the emulator-backed rows (they only add kills).
 """
 import argparse
+import os
 import pathlib
+import time
 import re
 import subprocess
 import sys
@@ -108,10 +110,14 @@ def main() -> int:
             rows.append((rid, sev, what, "STALE", "mutation text not found - update the table"))
             continue
         path.write_text(text.replace(old, new, 1))
+        time.sleep(1.1)   # a fresh mtime, so the incremental build cannot reuse the previous mutant's output
+        os.utime(path)
         try:
             result = run(["dotnet", "test", f"tests/TabTabGo.Storage.{project}", "-c", "Release", "--no-restore"])
         finally:
             run(["git", "checkout", "--quiet", "--", rel])
+            time.sleep(1.1)
+            os.utime(path)
         out = result.stdout + result.stderr
         if re.search(r" error CS\d+", out):
             rows.append((rid, sev, what, "NO-BUILD", "mutant does not compile"))
