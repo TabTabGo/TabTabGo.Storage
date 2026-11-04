@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Testing;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using TabTabGo.Core.Data;
+using TabTabGo.Core.Exceptions;
 using TabTabGo.Data.EF;
 using TabTabGo.Storage.Enums;
 using TabTabGo.Storage.Exceptions;
@@ -96,11 +97,23 @@ public class HookedFileService : FileService<File>
 
     public string? VetoTitle { get; set; }
 
+    /// <summary>Authorization-style gate: every state the update gate sees must have this ReferenceId.</summary>
+    public long? RequireReferenceId { get; set; }
+
+    public bool RejectPreDelete { get; set; }
+
+    public bool RejectPurge { get; set; }
+
+    public long? PreUpdateCurrentReferenceId { get; set; }
+
+    public (string Extension, string Name, string Path, long? Size, int Extra)? CreateSeen { get; private set; }
+
     /// <summary>Authorization-style hook: only allow updates of rows created by this user (judged on the entity the gate sees).</summary>
     public string? RequireCreatedBy { get; set; }
 
     public override bool IsValidToCreate(File entity, out string validationErrorMessage)
     {
+        CreateSeen = (entity.FileExtension, entity.OriginalFileName, entity.FilePath, entity.FileSize, entity.ExtraProperties?.Count ?? 0);
         Events.Add("IsValidToCreate");
         validationErrorMessage = "vetoed";
         return !RejectCreate;
@@ -123,23 +136,27 @@ public class HookedFileService : FileService<File>
         Events.Add("IsValidToUpdate");
         validationErrorMessage = "vetoed";
         return !RejectUpdate && (VetoTitle is null || entity?.Title != VetoTitle) &&
-               (RequireCreatedBy is null || entity?.CreatedBy == RequireCreatedBy);
+               (RequireCreatedBy is null || entity?.CreatedBy == RequireCreatedBy) &&
+               (RequireReferenceId is null || entity?.ReferenceId == RequireReferenceId);
     }
 
     public override Task PreUpdate(File current, File entity, CancellationToken cancellationToken)
     {
+        PreUpdateCurrentReferenceId = current.ReferenceId;
         Events.Add("PreUpdate");
         return Task.CompletedTask;
     }
 
     public override Task PreUpdate(File current, JsonObject entity, CancellationToken cancellationToken)
     {
+        PreUpdateCurrentReferenceId = current.ReferenceId;
         Events.Add("PreUpdate(json)");
         return Task.CompletedTask;
     }
 
     public override Task PreUpdate(File current, Microsoft.AspNetCore.JsonPatch.JsonPatchDocument<File> entity, CancellationToken cancellationToken)
     {
+        PreUpdateCurrentReferenceId = current.ReferenceId;
         Events.Add("PreUpdate(patch)");
         return Task.CompletedTask;
     }
@@ -157,8 +174,20 @@ public class HookedFileService : FileService<File>
         return !RejectDelete;
     }
 
+    public override bool IsValidToPurge(File entity, out string validationErrorMessage)
+    {
+        Events.Add("IsValidToPurge");
+        validationErrorMessage = "purge vetoed";
+        return !RejectPurge && base.IsValidToPurge(entity, out validationErrorMessage);
+    }
+
     protected override Task PreDelete(File entity, CancellationToken cancellationToken = default)
     {
+        if (RejectPreDelete)
+        {
+            throw new ApiException("vetoed in PreDelete", null, Microsoft.Extensions.Logging.LogLevel.Warning, null, HttpStatusCode.BadRequest, "PRE_DELETE_VETO");
+        }
+
         Events.Add("PreDelete");
         return Task.CompletedTask;
     }

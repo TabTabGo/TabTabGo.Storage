@@ -18,6 +18,12 @@ public class StorageServiceOptions
     /// <summary>When not empty, only these extensions are accepted.</summary>
     public ISet<string> AllowedExtensions { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Keep <c>ExtraProperties</c> of the metadata passed to <c>Upload</c>. Defaults to <c>false</c>: a request body that is
+    /// bound to the entity puts every unknown property into <c>ExtraProperties</c>, so the service clears them.
+    /// </summary>
+    public bool AllowMetadataExtraProperties { get; set; }
+
     /// <summary>Largest accepted upload in bytes. Defaults to 50 MiB; <c>null</c> means no limit.</summary>
     public long? MaxFileSizeBytes { get; set; } = 50L * 1024 * 1024;
 }

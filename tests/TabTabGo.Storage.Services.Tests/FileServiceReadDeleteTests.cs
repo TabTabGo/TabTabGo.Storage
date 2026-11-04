@@ -430,7 +430,9 @@ public class FileServiceDeleteTests : IDisposable
         await _h.Service.Delete([a.FileId], CancellationToken.None);
         await _h.Service.Delete(f => f.FileId == b.FileId);
 
-        Assert.Equal(["IsValidToDelete", "PreDelete(many)", "PostDelete(many)", "IsValidToDelete", "PreDelete(many)", "PostDelete(many)"],
+        Assert.Equal(
+            ["IsValidToDelete", "PreDelete(many)", "PreDelete", "PostDelete(many)", "PostDelete",
+             "IsValidToDelete", "PreDelete(many)", "PreDelete", "PostDelete(many)", "PostDelete"],
             _h.Service.Events);
     }
 

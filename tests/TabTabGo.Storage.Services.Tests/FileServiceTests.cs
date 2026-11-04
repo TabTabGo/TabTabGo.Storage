@@ -630,7 +630,7 @@ public class FileServiceReplaceAndUpdateTests : IDisposable
         await _h.Service.Update(file.FileId, FileServiceHarness.Meta());
         await _h.Service.Update(file.FileId, new JsonObject());
 
-        Assert.Equal(["IsValidToUpdate", "PreUpdate", "PostUpdate", "IsValidToUpdate", "PreUpdate(json)", "PostUpdate"], _h.Service.Events);
+        Assert.Equal(["IsValidToUpdate", "IsValidToUpdate", "PreUpdate", "PostUpdate", "IsValidToUpdate", "IsValidToUpdate", "PreUpdate(json)", "PostUpdate"], _h.Service.Events);
     }
 
     [Fact]
@@ -804,7 +804,7 @@ public class FileServiceReplaceAndUpdateTests : IDisposable
 
         await _h.Service.Replace(file.FileId, FileServiceHarness.Text("n.txt", "new"));
 
-        Assert.Equal(["IsValidToUpdate", "PreUpdate", "PostUpdate"], _h.Service.Events);
+        Assert.Equal(["IsValidToUpdate", "IsValidToUpdate", "PreUpdate", "PostUpdate"], _h.Service.Events);
     }
 
     [Fact]

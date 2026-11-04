@@ -157,6 +157,22 @@ public class ContentDispositionFormatterTests
     }
 
     [Theory]
+    [InlineData("\u200B")]
+    [InlineData("\u200C")]
+    [InlineData("\u200D")]
+    [InlineData("\u2060")]
+    [InlineData("\uFEFF")]
+    [InlineData("\u2028")]
+    [InlineData("\u2029")]
+    public void Format_ZeroWidthAndLineSeparators_AreRemoved(string invisible)
+    {
+        var value = ContentDispositionFormatter.Format($"pay{invisible}roll.pdf");
+
+        Assert.Contains("filename=\"payroll.pdf\"", value);
+        Assert.DoesNotContain(invisible, value, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("\r\n")]

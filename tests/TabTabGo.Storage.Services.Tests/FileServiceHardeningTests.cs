@@ -494,7 +494,7 @@ public class FileServiceValidationHardeningTests : IDisposable
         var row = _h.Reload(file.FileId);
         Assert.True(row.IsEnabled);
         Assert.Equal(_h.Time.GetUtcNow(), row.CreatedDate);
-        Assert.True(row.IsCompressed);
+        Assert.False(row.IsCompressed);   // we never compress: false is the truthful value, not the column default
     }
 
     // IsValidToCreate / PreCreate run before anything is stored

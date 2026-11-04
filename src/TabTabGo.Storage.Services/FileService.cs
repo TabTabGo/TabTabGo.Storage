@@ -597,6 +597,16 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         await PostDelete(files, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Validation hook for <see cref="Purge(long, CancellationToken)"/> and its bulk form. Defaults to
+    /// <c>IsValidToDelete</c>; override it to treat the irreversible purge more strictly than the soft delete.
+    /// </summary>
+    /// <param name="entity">The file about to be purged.</param>
+    /// <param name="validationErrorMessage">Why the purge is refused.</param>
+    /// <returns><c>true</c> when the purge may proceed.</returns>
+    public virtual bool IsValidToPurge(TFile entity, out string validationErrorMessage) =>
+        IsValidToDelete(entity, out validationErrorMessage);
+
     // Every delete overload rejects the whole operation when any file fails IsValidToDelete, before anything changes.
     private void EnsureAllDeletable(IEnumerable<TFile> files)
     {

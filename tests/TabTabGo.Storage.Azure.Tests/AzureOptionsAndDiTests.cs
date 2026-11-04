@@ -59,6 +59,28 @@ public class ContainerNameTests
         Assert.Equal(legacy, ContainerNameNormalizer.Normalize(input));
     }
 
+    // N4: ToLower() is culture-sensitive: under tr-TR "Image" became "mage" (dotless i), so Accept-Language changed the container.
+    [Theory]
+    [InlineData("tr-TR")]
+    [InlineData("az-Latn-AZ")]
+    [InlineData("tr")]
+    public void Normalizer_IsCultureInvariant(string culture)
+    {
+        var original = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo(culture);
+
+            Assert.Equal("image", ContainerNameNormalizer.Normalize("Image"));
+            Assert.Equal("ilk-dosya", ContainerNameNormalizer.Normalize("ILK DOSYA"));
+            Assert.Equal("wordocument".Length, ContainerNameNormalizer.Normalize("WORDOCUMENT").Length);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = original;
+        }
+    }
+
     [Fact]
     public void Normalizer_MyFiles_StaysMyfiles_SoExistingBlobsStayReachable() =>
         Assert.Equal("myfiles", ContainerNameNormalizer.Normalize("my_files"));
