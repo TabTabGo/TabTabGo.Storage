@@ -327,6 +327,34 @@ public class FileServiceMassAssignmentTests : IDisposable
     }
 }
 
+public class FileServiceTrackedInstanceTests : IDisposable
+{
+    private readonly FileServiceHarness _h = new();
+
+    public void Dispose() => _h.Dispose();
+
+    // A controller that loads the entity, edits it and passes it back must keep its allow-listed edits ...
+    [Fact]
+    public async Task Update_PassingTheTrackedInstanceItself_KeepsTheAllowListedEdit_AndStillRestoresTheRest()
+    {
+        var file = await _h.UploadTextAsync();
+        var path = file.FilePath;
+        var tracked = _h.Db.Context.Set<File>().Local.Single(f => f.FileId == file.FileId);
+        tracked.Title = "edited by the caller";
+        tracked.Comment = "edited too";
+        tracked.FilePath = "../../elsewhere";   // ... but the storage-owned field it also touched is not accepted
+        tracked.CreatedBy = "attacker";
+
+        await _h.Service.Update(file.FileId, tracked);
+
+        var row = _h.Reload(file.FileId);
+        Assert.Equal("edited by the caller", row.Title);
+        Assert.Equal("edited too", row.Comment);
+        Assert.Equal(path, row.FilePath);
+        Assert.Equal("tester", row.CreatedBy);
+    }
+}
+
 public class FileServiceValidationHardeningTests : IDisposable
 {
     private readonly FileServiceHarness _h = new();

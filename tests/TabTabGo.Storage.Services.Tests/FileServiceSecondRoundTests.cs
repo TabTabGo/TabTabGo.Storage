@@ -248,7 +248,7 @@ public class FileServiceFullRestoreTests : IDisposable
         tracked.ExtraProperties["role"] = "admin";
         tracked.Title = "tampered";
 
-        await _service.Update(own.FileId, new TenantFile { Comment = "ok", FileType = FileType.Text });
+        await _service.Update(own.FileId, new TenantFile { Title = "t", Comment = "ok", FileType = FileType.Text });
 
         var row = Reload(own.FileId);
         Assert.Equal(1, row.TenantId);

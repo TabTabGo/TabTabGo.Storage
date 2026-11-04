@@ -39,6 +39,16 @@ public static class ContentDispositionFormatter
     public static bool IsBidiControl(char c) =>
         c is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069' or '\u200E' or '\u200F' or '\u061C';
 
+    /// <summary>
+    /// Returns whether a character is invisible or reorders text: the bidi controls of <see cref="IsBidiControl"/>, the
+    /// zero-width characters U+200B-200D, U+2060 and U+FEFF, and the line / paragraph separators U+2028 and U+2029.
+    /// They make two different file names look identical, or hide an extension, and are removed from names.
+    /// </summary>
+    /// <param name="c">Character to test.</param>
+    /// <returns><c>true</c> for an invisible or reordering character.</returns>
+    public static bool IsInvisibleControl(char c) =>
+        IsBidiControl(c) || c is >= '\u200B' and <= '\u200D' or '\u2060' or '\uFEFF' or '\u2028' or '\u2029';
+
     private static string Clean(string? fileName)
     {
         if (string.IsNullOrEmpty(fileName))
@@ -51,7 +61,7 @@ public static class ContentDispositionFormatter
         var builder = new StringBuilder(name.Length);
         foreach (var c in name)
         {
-            if (c < ' ' || c == '\u007f' || c == '"' || IsBidiControl(c))
+            if (c < ' ' || c == '\u007f' || c == '"' || IsInvisibleControl(c))
             {
                 continue;
             }

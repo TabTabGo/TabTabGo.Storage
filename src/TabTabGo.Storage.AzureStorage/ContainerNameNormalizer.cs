@@ -5,7 +5,7 @@ namespace TabTabGo.Storage.AzureStorage;
 
 /// <summary>
 /// Maps a logical container name to an Azure container name. For every name that 6.x could already store, the result is
-/// exactly the 6.0.8.4 output (trim, lower-case, space to hyphen, drop everything but [a-z0-9-], cut at 63, trim
+/// exactly the 6.0.8.4 output on every non-Turkic culture (trim, invariant lower-case, space to hyphen, drop everything but [a-z0-9-], cut at 63, trim
 /// hyphens) - otherwise existing blobs become unreachable. Only names that Azure rejected before (a "--" run, or fewer
 /// than 3 characters) are adjusted: hyphen runs collapse and short names are padded with <c>0</c>.
 /// </summary>
@@ -30,7 +30,7 @@ internal static partial class ContainerNameNormalizer
         }
 
         // The 6.0.8.4 algorithm, unchanged.
-        var name = input.Trim().ToLower().Replace(" ", "-");
+        var name = input.Trim().ToLowerInvariant().Replace(" ", "-");
         name = InvalidChars().Replace(name, string.Empty);
         if (name.Length > MaxLength)
         {
