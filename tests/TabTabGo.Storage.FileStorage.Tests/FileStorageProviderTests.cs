@@ -276,6 +276,64 @@ public class FileStorageProviderTests : IDisposable
         Assert.Null(await _h.Provider.RetrieveAsync("dir", "Image"));
     }
 
+    // QA: 2 of 8 concurrent no-overwrite stores won. Exactly one writer may win, on every OS.
+    [Fact]
+    public async Task Store_OverwriteFalse_8Concurrent_ExactlyOneWinner_25Rounds()
+    {
+        for (var round = 0; round < 25; round++)
+        {
+            var name = $"race-{round}.txt";
+            var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(i => Task.Run(async () =>
+            {
+                using var content = new MemoryStream(Bytes(new string((char)('a' + i), 50_000)));
+                try
+                {
+                    await _h.Provider.StoreAsync(content, name, new StorageWriteOptions { Overwrite = false }, "Text");
+                    return true;
+                }
+                catch (StorageException e) when (e.ErrorCode == "STORAGE_OBJECT_EXISTS")
+                {
+                    return false;
+                }
+            })));
+
+            Assert.Equal(1, results.Count(r => r));
+            await using var stored = await _h.Provider.RetrieveAsync(name, "Text");
+            var text = new StreamReader(stored!).ReadToEnd();
+            Assert.Equal(50_000, text.Length);
+            Assert.Single(text.Distinct());
+        }
+
+        Assert.Empty(Directory.GetFiles(_h.Disk("store", "Text"), "*.tmp"));
+    }
+
+    [Fact]
+    public async Task Store_OverwriteFalse_FailedWrite_DoesNotLeaveAHalfFileBehind()
+    {
+        using var broken = new ThrowingStream();
+
+        await Assert.ThrowsAsync<StorageException>(() =>
+            _h.Provider.StoreAsync(broken, "half.txt", new StorageWriteOptions { Overwrite = false }, "Text"));
+
+        Assert.False(File.Exists(_h.Disk("store", "Text", "half.txt")));
+    }
+
+    private sealed class ThrowingStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new IOException("disk gone");
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            throw new IOException("disk gone");
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     [Fact]
     public async Task Store_OverwriteFalse_LeavesNoTempFile()
     {

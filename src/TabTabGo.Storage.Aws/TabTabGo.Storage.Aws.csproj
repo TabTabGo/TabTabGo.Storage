@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="TabTabGo.Storage.Aws.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
   </ItemGroup>
 

@@ -212,6 +212,15 @@ public class FileServiceUploadTests : IDisposable
     }
 
     [Fact]
+    public async Task Upload_FileName_BidiControlCharactersAreStripped()
+    {
+        var file = await _h.Service.Upload(FileServiceHarness.Meta(), FileServiceHarness.Text("photo\u202Egnp.txt"));
+
+        Assert.Equal("photognp.txt", file.OriginalFileName);
+        Assert.DoesNotContain(file.OriginalFileName, c => c is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069');
+    }
+
+    [Fact]
     public async Task Upload_EmptyName_BecomesFile()
     {
         var file = await _h.Service.Upload(FileServiceHarness.Meta(), FileUpload.FromBytes([1], "///", null));

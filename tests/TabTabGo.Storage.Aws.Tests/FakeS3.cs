@@ -43,7 +43,7 @@ public sealed class FakeS3
                     };
                 }
 
-                return Task.FromResult(new GetObjectResponse { ResponseStream = new MemoryStream(data) });
+                return Task.FromResult(new GetObjectResponse { ResponseStream = ResponseStreamFactory?.Invoke(data) ?? new MemoryStream(data) });
             });
         Client.Setup(c => c.GetObjectMetadataAsync(It.IsAny<GetObjectMetadataRequest>(), It.IsAny<CancellationToken>()))
             .Returns<GetObjectMetadataRequest, CancellationToken>((request, ct) =>
@@ -66,6 +66,8 @@ public sealed class FakeS3
     }
 
     public Mock<IAmazonS3> Client { get; }
+
+    public Func<byte[], Stream>? ResponseStreamFactory { get; set; }
 
     public ConcurrentDictionary<string, byte[]> Objects { get; } = new();
 

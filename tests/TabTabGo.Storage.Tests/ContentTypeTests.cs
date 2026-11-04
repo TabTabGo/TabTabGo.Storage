@@ -144,6 +144,18 @@ public class ContentDispositionFormatterTests
     public void Format_PathSegments_AreDropped() =>
         Assert.Contains("filename=\"passwd\"", ContentDispositionFormatter.Format("..\\..\\etc/passwd"));
 
+    [Fact]
+    public void Format_BidiControlCharacters_AreRemoved()
+    {
+        var value = ContentDispositionFormatter.Format("invoice\u202Egnp.exe\u2066x\u2069\u200E.pdf");
+
+        Assert.DoesNotContain("\u202E", value);
+        Assert.DoesNotContain("\u2066", value);
+        Assert.DoesNotContain("\u2069", value);
+        Assert.DoesNotContain("%E2%80%AE", value);
+        Assert.Contains("filename=\"invoicegnp.exex.pdf\"", value);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
