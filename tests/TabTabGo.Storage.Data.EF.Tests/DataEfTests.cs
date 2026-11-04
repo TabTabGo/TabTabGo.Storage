@@ -37,6 +37,20 @@ public class GoldenModelTests
         using var connection = new SqliteConnection("DataSource=:memory:");
         connection.Open();
         using var context = new CustomContext(new DbContextOptionsBuilder().UseSqlite(connection).ReplaceService<IModelCacheKeyFactory, NoCacheKeyFactory>().Options, map);
+        return Describe(context);
+    }
+
+    // The SQL Server provider is used for metadata only; the connection string is never used to connect.
+    private static JsonElement CaptureSqlServer(Action<ModelBuilder> map)
+    {
+        using var context = new CustomContext(
+            new DbContextOptionsBuilder().UseSqlServer("Server=.;Database=golden;Trusted_Connection=True;TrustServerCertificate=True")
+                .ReplaceService<IModelCacheKeyFactory, NoCacheKeyFactory>().Options, map);
+        return Describe(context);
+    }
+
+    private static JsonElement Describe(DbContext context)
+    {
         var entity = context.Model.FindEntityType(typeof(File))!;
         var properties = entity.GetProperties().Select(p => new
         {
@@ -62,8 +76,8 @@ public class GoldenModelTests
         return JsonSerializer.SerializeToElement(model);
     }
 
-    private static JsonElement Golden() =>
-        JsonDocument.Parse(System.IO.File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Golden", "file-model-6.0.8.4.json")))
+    private static JsonElement Golden(string file = "file-model-6.0.8.4.json") =>
+        JsonDocument.Parse(System.IO.File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Golden", file)))
             .RootElement.Clone();
 
     private sealed class CustomContext(DbContextOptions options, Action<ModelBuilder> map) : DbContext(options)
@@ -95,6 +109,11 @@ public class GoldenModelTests
     [Fact]
     public void StorageModel_MatchesGolden_6084() =>
         AssertSame(Golden(), Capture(mb => StorageModelsBuilder.OnModelCreating(mb)));
+
+    // Same proof on the SQL Server provider's store types (nvarchar(500), bigint, datetimeoffset, NTEXT ...).
+    [Fact]
+    public void StorageModel_MatchesGolden_6084_SqlServer() =>
+        AssertSame(Golden("file-model-6.0.8.4.sqlserver.json"), CaptureSqlServer(mb => StorageModelsBuilder.OnModelCreating(mb)));
 
     [Fact]
     public void StorageModel_ViaStorageDbContext_MatchesGolden_6084()

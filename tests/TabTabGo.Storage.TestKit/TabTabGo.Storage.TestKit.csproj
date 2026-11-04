@@ -24,6 +24,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The golden capture tool is built separately by Golden/capture/capture.py against the 6.0.8.4 sources. -->
+    <Compile Remove="Golden/capture/**" />
+    <None Remove="Golden/capture/**" />
     <None Update="Golden\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
