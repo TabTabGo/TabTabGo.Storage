@@ -289,6 +289,7 @@ public class FileStorageProviderTests : IDisposable
     }
 
     [Fact]
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
     public async Task Store_ReadOnlyDirectory_ThrowsStorageException()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "POSIX permissions only");

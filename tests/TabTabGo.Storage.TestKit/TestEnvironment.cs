@@ -55,11 +55,16 @@ public static class DockerAvailable
 {
     private static readonly Lazy<bool> Probe = new(Check);
 
-    /// <summary>Whether <c>docker info</c> succeeds.</summary>
+    /// <summary>Whether <c>docker info</c> succeeds. <c>TTG_SKIP_EMULATORS=true</c> forces <c>false</c> (CI runners without Linux containers).</summary>
     public static bool IsAvailable => Probe.Value;
 
     private static bool Check()
     {
+        if (string.Equals(Environment.GetEnvironmentVariable("TTG_SKIP_EMULATORS"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         try
         {
             using var process = Process.Start(new ProcessStartInfo("docker", "info")

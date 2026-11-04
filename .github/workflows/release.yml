@@ -1,0 +1,305 @@
+name: Release
+
+# Tag-driven publish to nuget.org. The file name is fixed: the nuget.org trusted-publishing policy pins it.
+# Nothing publishes on a push to a branch or on a pull request. A stable tag needs a manual approval.
+#
+# Security properties (do not weaken):
+#   * The tag is validated against a strict pattern BEFORE it is used anywhere, resolved only as refs/tags/<tag>,
+#     and the commit it points at is what gets built (never a branch of the same name).
+#   * Inputs and context values reach shell steps only through env:, never interpolated into run:.
+#   * The release is not authorised by github.actor alone: a re-run keeps the original actor, so the
+#     triggering actor must equal the actor and run_attempt must be 1. A re-run needs a fresh dispatch.
+#   * Publishing fails closed: it requires the repository variable RELEASE_APPROVAL_MODE=environment, which attests
+#     that the protected `nuget-release` environment (required reviewers) is configured. Unset or any other value
+#     refuses to publish.
+#   * This workflow builds and tests the tagged commit itself; it never trusts or reuses an earlier CI run.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)build, for example v8.0.0'
+        required: true
+        type: string
+      dry-run:
+        description: 'Run guard, build, test and pack only; publish nothing'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  guard:
+    name: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      version: ${{ steps.verify.outputs.version }}
+      prerelease: ${{ steps.verify.outputs.prerelease }}
+      dry_run: ${{ steps.authorize.outputs.dry_run }}
+    steps:
+      - name: Authorize the run
+        id: authorize
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_DRY_RUN: ${{ inputs.dry-run }}
+          APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+        run: |
+          set -euo pipefail
+          if [ "$ACTOR" != "$TRIGGERING_ACTOR" ]; then echo "::error::triggering actor differs from actor (re-run by another user)"; exit 1; fi
+          if [ "$RUN_ATTEMPT" != "1" ]; then echo "::error::re-runs are refused; dispatch a new run"; exit 1; fi
+          dry=false
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DISPATCH_DRY_RUN" = "true" ]; then dry=true; fi
+          if [ "$dry" != "true" ] && [ "$APPROVAL_MODE" != "environment" ]; then
+            echo "::error::RELEASE_APPROVAL_MODE is not 'environment'; refusing to publish (fail closed)"; exit 1
+          fi
+          echo "dry_run=$dry" >> "$GITHUB_OUTPUT"
+
+      - name: Validate the tag
+        id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then tag="$DISPATCH_TAG"; else
+            if [ "$REF_TYPE" != "tag" ]; then echo "::error::not a tag ref"; exit 1; fi
+            tag="$REF_NAME"
+          fi
+          re='^v[0-9]+\.[0-9]+\.[0-9]+(-(rc|preview|alpha|beta)\.[0-9]+)?$'
+          if [[ "$tag" == *$'\n'* ]] || ! [[ "$tag" =~ $re ]]; then
+            echo "::error::tag does not match vMAJOR.MINOR.PATCH[-rc|preview|alpha|beta.N]"; exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the tag explicitly
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve the tagged commit
+        id: resolve
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          head="$(git rev-parse HEAD)"
+          if [ "$sha" != "$head" ]; then echo "::error::checked-out commit is not the tag's commit"; exit 1; fi
+          if [ "$EVENT_NAME" = "push" ] && [ "$sha" != "$EVENT_SHA" ]; then echo "::error::tag commit differs from the pushed commit"; exit 1; fi
+          printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag, framework, branch, version and Core dependency
+        id: verify
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          core="${version%%-*}"
+          IFS=. read -r major minor patch <<<"$core"
+
+          tfm="$(grep -oE '<TargetFramework>[^<]+' Directory.Build.props | head -1 | sed 's/<TargetFramework>//')"
+          [ "$tfm" = "net${major}.0" ] || { echo "::error::tag major $major does not match TargetFramework $tfm"; exit 1; }
+
+          branches="$(git branch -r --contains "$SHA" | sed 's/^[* ]*//')"
+          printf '%s\n' "$branches" | grep -Eq "^origin/releases/v${major}\.${minor}\.x/" \
+            || { echo "::error::tagged commit is not on a releases/v${major}.${minor}.x/* branch"; exit 1; }
+
+          declared="$(grep -oE '<Version>[^<]+' Directory.Build.props | head -1 | sed 's/<Version>//')"
+          [ "$declared" = "$core" ] || { echo "::error::tag $core differs from Directory.Build.props Version $declared"; exit 1; }
+
+          if grep -E 'PackageVersion Include="TabTabGo\.' Directory.Packages.props | grep -qE -- '-local|local\.'; then
+            echo "::error::a -local Core version is referenced; local feeds must not be released"; exit 1
+          fi
+          prerelease=false
+          if [[ "$version" == *-* ]]; then prerelease=true; fi
+          if [ "$prerelease" = "false" ] && grep -E 'PackageVersion Include="TabTabGo\.' Directory.Packages.props | grep -qE 'Version="\[?[0-9]+\.[0-9]+\.[0-9]+-'; then
+            echo "::error::a stable tag must not depend on a pre-release TabTabGo.Core"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  build-test-pack:
+    name: build-test-pack
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
+      # Packable projects. Add TabTabGo.Storage.Api here when the minimal-API package ships (step A10).
+      EXPECTED_PACKAGES: 'TabTabGo.Storage TabTabGo.Storage.Services TabTabGo.Storage.Data.EF TabTabGo.Storage.Aws TabTabGo.Storage.Azure TabTabGo.Storage.FileStorage'
+      GITLEAKS_VERSION: '8.30.1'
+      GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+    steps:
+      - name: Checkout the validated commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup .NET (SDK from global.json)
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore TabTabGo.Storage.sln
+
+      - name: Build (warnings are errors)
+        run: dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
+
+      - name: Test (emulator tests included; Docker is available on this runner)
+        run: dotnet test TabTabGo.Storage.sln -c Release --no-build --collect:"XPlat Code Coverage" --results-directory coverage
+
+      - name: Coverage gate
+        run: python3 scripts/coverage-gate.py coverage
+
+      - name: Vulnerable and deprecated packages
+        run: |
+          set -euo pipefail
+          dotnet list TabTabGo.Storage.sln package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
+          dotnet list TabTabGo.Storage.sln package --deprecated 2>&1 | tee deprecated.txt
+          if grep -qE "has the following vulnerable packages" vulnerable.txt; then echo "::error::vulnerable packages"; exit 1; fi
+          if grep -qE "has the following deprecated packages" deprecated.txt; then echo "::error::deprecated packages"; exit 1; fi
+
+      - name: Secret scan (checksum-verified gitleaks)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+          ./gitleaks dir . --no-banner --redact --exit-code 1
+
+      - name: Pack
+        run: dotnet pack TabTabGo.Storage.sln -c Release --no-build -p:Version="$VERSION" -p:ContinuousIntegrationBuild=true -o out
+
+      - name: Verify the package set
+        run: |
+          set -euo pipefail
+          expected_count="$(wc -w <<<"$EXPECTED_PACKAGES")"
+          [ "$(ls out/*.nupkg | wc -l)" -eq "$expected_count" ] || { echo "::error::unexpected number of .nupkg"; exit 1; }
+          [ "$(ls out/*.snupkg | wc -l)" -eq "$expected_count" ] || { echo "::error::unexpected number of .snupkg"; exit 1; }
+          for id in $EXPECTED_PACKAGES; do
+            file="out/${id}.${VERSION}.nupkg"
+            [ -f "$file" ] || { echo "::error::missing $file"; exit 1; }
+            unzip -p "$file" "${id}.nuspec" | grep -q "<version>${VERSION}</version>" || { echo "::error::$file has the wrong version"; exit 1; }
+            unzip -l "$file" | grep -q "lib/net8.0/" || { echo "::error::$file has no net8.0 lib"; exit 1; }
+            unzip -l "$file" | grep -q "README.md" || { echo "::error::$file has no README"; exit 1; }
+          done
+
+      - name: Upload packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages
+          path: out
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: [guard, build-test-pack]
+    if: needs.guard.outputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Stable tags wait for a required reviewer; pre-release tags do not (as in Core).
+    environment: ${{ needs.guard.outputs.prerelease == 'true' && 'nuget-prerelease' || 'nuget-release' }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Re-check the authorization context
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+        run: |
+          set -euo pipefail
+          [ "$ACTOR" = "$TRIGGERING_ACTOR" ] && [ "$RUN_ATTEMPT" = "1" ] && [ "$APPROVAL_MODE" = "environment" ]
+
+      - name: Download packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: out
+
+      - name: Select the authentication mode
+        id: mode
+        env:
+          NUGET_USER: ${{ secrets.NUGET_USER }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$NUGET_USER" ]; then echo "mode=oidc" >> "$GITHUB_OUTPUT";
+          elif [ -n "$NUGET_API_KEY" ]; then echo "mode=key" >> "$GITHUB_OUTPUT";
+          else echo "::error::configure NUGET_USER (trusted publishing) or the environment secret NUGET_API_KEY"; exit 1; fi
+
+      - name: NuGet trusted publishing login (short-lived key)
+        id: login
+        if: steps.mode.outputs.mode == 'oidc'
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to nuget.org (trusted publishing)
+        if: steps.mode.outputs.mode == 'oidc'
+        env:
+          NUGET_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push "out/*.nupkg" --api-key "$NUGET_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Push to nuget.org (environment-scoped key fallback)
+        if: steps.mode.outputs.mode == 'key'
+        env:
+          NUGET_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push "out/*.nupkg" --api-key "$NUGET_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  github-release:
+    name: github-release
+    needs: [guard, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: out
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.guard.outputs.tag }}
+          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          flags=(--verify-tag --generate-notes)
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" out/*.nupkg "${flags[@]}"

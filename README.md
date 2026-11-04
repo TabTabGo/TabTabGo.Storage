@@ -1,30 +1,129 @@
 # TabTabGo Storage
-A list of library help to manage files and file storage 
-## TabTabGo Storage
-a core library for TabTabGo Storage include entity, repository interface, service interface, and other helper
-## TabTabGo Storage Service
-a service library for TabTabGo Storage include service implementation
-## TabTabGo Storage Data Entity Framework
-a data entity framework library for TabTabGo Storage include entity framework model builder and repository implementation
-## Supported Storage Providers
-based on provider can define location to store a file (local, azure blob storage, aws s3, etc)
-to add new provider, just implement IStorageProvider interface
-to use provider, just inject IStorageProvider interface to your service
-### Local Storage Provider 
-a local storage provider library for TabTabGo Storage include local storage provider implementation
-in program.cs, add this line
+
+File storage for .NET: one port (`IStorageProvider`), three providers (AWS S3, Azure Blob, local disk), a `File`
+entity and `FileService<TFile>` (upload, replace, update, read, delete, image thumbnails), and an EF Core model
+builder. This is the **v8 line** (`net8.0`, package version `8.x`, depends on `TabTabGo.Core` 8.0.1 or later 8.x).
+
+## Packages
+
+| Package | What it is |
+|---|---|
+| `TabTabGo.Storage` | Domain and ports: `IStorageProvider`, `File`/`IFile`, `StoragePath`, `FileUpload`, `StorageException`, `ContentTypeMap`, `InMemoryStorageProvider` for tests. No ASP.NET Core dependency. |
+| `TabTabGo.Storage.Services` | `FileService<TFile>`, `ImageService` (SkiaSharp), dependency-injection setup, `IFormFile.ToFileUpload()` |
+| `TabTabGo.Storage.Data.EF` | `StorageModelsBuilder`, `StorageDbContext`, `StorageDbProvider`. Ships no migrations. |
+| `TabTabGo.Storage.Aws` | S3 provider (AWS SDK for .NET v4) |
+| `TabTabGo.Storage.Azure` | Azure Blob provider (connection string or managed identity) |
+| `TabTabGo.Storage.FileStorage` | Local file-system provider |
+
+Release lines: **v8** (this one, .NET 8 - note .NET 8 support ends 2026-11-10, so v8 is a bridge line), **v10**
+(.NET 10 LTS, the long-term home) and **v11** (.NET 11 pre-releases). Fixes land on v8 first and are merged forward.
+
+## Choosing a provider
+
+| Need | Provider |
+|---|---|
+| Containers/Kubernetes, many instances, durable object storage on AWS | `.Aws` |
+| Azure hosting, managed identity | `.Azure` |
+| Single host, development, on-premises | `.FileStorage` (keep the root outside the web root) |
+| Tests of your own code | `InMemoryStorageProvider` (`TabTabGo.Storage.Testing`) |
+
+## Quick start
+
+Register exactly one provider; credentials do not belong in configuration.
+
 ```csharp
-services.Register<IStorageProvider,FileStorageProvider>();
+// S3: leave AccessKey/SecretKey empty to use the IAM role / default AWS credential chain.
+services.AddTabTabGoS3Storage(configuration.GetSection("aws"));        // aws:BucketName, aws:Region
+
+// Azure: a token credential chosen by the host (managed identity), no account key.
+services.AddTabTabGoAzureBlobStorage(new Uri("https://account.blob.core.windows.net"), new DefaultAzureCredential());
+
+// Local disk
+services.AddTabTabGoFileStorage(configuration.GetSection("PathSettings")); // PathSettings:RootPath, FileTypePaths:Image ...
+
+// File service over your unit of work (for example StorageDbProvider from .Data.EF)
+services.AddTabTabGoStorageServices<TabTabGo.Storage.Entities.File>(o => o.MaxFileSizeBytes = 20_000_000);
 ```
-### Azure Blob Storage Provider
-a azure blob storage provider library for TabTabGo Storage include azure blob storage provider implementation
-in program.cs, add this line
+
+Upload:
+
 ```csharp
-services.Register<IStorageProvider,BlobStorageProvider>();
+var file = await fileService.Upload(new File { Title = "Invoice", FileType = FileType.PDF, CreatedBy = user },
+                                    formFile.ToFileUpload(), cancellationToken);
 ```
-### AWS S3 Storage Provider
-a aws s3 storage provider library for TabTabGo Storage include aws s3 storage provider implementation
-in program.cs, add this line
-```csharp
-services.Register<IStorageProvider,S3StorageProvider>();
+
+## Provider contract
+
+Every provider passes the same contract suite:
+
+- `RetrieveAsync` / `OpenReadAsync` return `null` only when the object does not exist; `RetrieveAsync` returns a
+  seekable stream at position 0.
+- `StoreAsync` returns the stored relative path and never `null`; it **overwrites** unless
+  `StorageWriteOptions.Overwrite = false`.
+- `DeleteAsync` is idempotent (a missing object is a no-op).
+- Any other failure throws `StorageException` (an `ApiException`: 400 for an invalid path, 409 for an existing object
+  when overwrite is off, 502 for upstream failures). It carries provider, operation, container and path, never a
+  credential or a signed URL.
+- Every path goes through `StoragePath.Normalize`: `\` becomes `/`, duplicate separators collapse; rooted, UNC and
+  drive paths, `.`/`..` segments, `:` and control characters are rejected.
+
+## Security notes
+
+- **Store outside the web root.** Files served by static-file middleware execute in the browser. `PathService`
+  logs a warning when the storage root is under `wwwroot`.
+- **Denied extensions.** `StorageServiceOptions.DeniedExtensions` refuses HTML, SVG, XML/XHTML/XSL, JavaScript and
+  executables by default; use `AllowedExtensions` for an allow-list. An extension is at most 10 characters.
+- **Content type comes from the extension**, never from the client (`ContentTypeMap`). Script-capable types are
+  never mapped to their native type, and signed URLs only override the response type to the type of the object's
+  own extension (the caller's string is never echoed).
+- **Updates cannot move files.** `FilePath`, `FileSize`, `FileExtension`, `OriginalFileName` and
+  `OriginalMediaType` change only through `Upload` / `Replace`.
+- **Credentials:** use an IAM role (S3) or managed identity (Azure). Presigned URLs and SAS live between 1 minute
+  and 7 days.
+- Thumbnail generation rejects images over `ImageServiceOptions.MaxPixels` (decompression-bomb guard).
+
+## Upgrading from 6.x
+
+| Change | Migration |
+|---|---|
+| `net8.0` only; Core 8.0.1 | consume the v8 Core line |
+| AWS SDK v3 to v4 | move every `AWSSDK.*` package of the app to 4.x |
+| `IFile.FormFile` removed | `Upload(entity, formFile.ToFileUpload())`; `Create(entity)` now returns 400 `FILE_CONTENT_REQUIRED`. Add `<FrameworkReference Include="Microsoft.AspNetCore.App" />` to projects that used `IFormFile` through this package |
+| Updates ignore storage-owned fields | use `Replace(id, upload)` to change content |
+| `Store` throws instead of returning `null`; missing objects return `null` on every provider | catch `StorageException` |
+| S3 `Retrieve` stream is at position 0 | a leftover `Seek(0)` is harmless |
+| Azure `GetPublicPath` returns an absolute SAS URL | stop prefixing a host |
+| LightInject composition roots removed | `AddTabTabGo...()` |
+| `S3StorageProvider` / `BlobStorageProvider` constructors | resolve through DI; the old constructors are `[Obsolete]` |
+| `PathService(IHostEnvironment, ...)` | DI is unaffected |
+| `FileResult` fields are properties and `FileResult` is `IAsyncDisposable` | recompile; dispose it |
+| `ImageSizeExtensions` is in `TabTabGo.Storage.Services` | add the `using` |
+| `FileNotFoundException` / `TTGException` become `ApiException` (404/400) | update exception filters |
+| GIF/BMP/ICO thumbnails are PNG; JPEG quality 90 | none |
+| `Delete(id)` / `Delete(ids)` remove the row (hard delete, like `Delete(query)`) and then the stored objects | previously a soft delete of the row |
+| `StorageDbContext` maps `File` | only matters if you generated migrations from it |
+| `TabTabGo.Storage.WebApi` (never published) | removed; a minimal-API read package is planned |
+
+## Building, testing, releasing
+
+```bash
+dotnet restore
+dotnet build -c Release -warnaserror
+dotnet test -c Release
 ```
+
+`global.json` pins the SDK. While `TabTabGo.Core` 8.0.1 is not on nuget.org, pack it to a local feed
+(`python3 ../scripts/pack-core-local.py`) and restore with a git-ignored `nuget.local.config`
+(`dotnet restore --configfile nuget.local.config`). Emulator tests (LocalStack, Azurite) need Docker and skip
+themselves without it; set `TTG_SKIP_EMULATORS=true` to skip them explicitly.
+
+**Releasing.** `.github/workflows/release.yml` publishes only from a tag `vMAJOR.MINOR.PATCH[-rc.N]` whose major
+equals the target framework major, whose commit is on `releases/vMAJOR.MINOR.x/*`, whose version equals
+`Directory.Build.props` `Version`, and (for a stable tag) whose Core dependency is stable. Stable releases wait for
+manual approval in the `nuget-release` environment; the repository variable `RELEASE_APPROVAL_MODE=environment`
+must be set or the workflow refuses to publish. Publishing uses nuget.org trusted publishing (`NUGET_USER`) with an
+environment-scoped API key as the only fallback. CI (`ci.yml`) never publishes.
+
+## License
+
+MIT.

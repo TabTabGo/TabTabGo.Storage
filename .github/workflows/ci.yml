@@ -1,0 +1,118 @@
+name: CI
+
+# Build, test and scan. Never publishes, never reads a secret, never runs with a write token.
+# Uses pull_request (not pull_request_target) so fork PRs get no secrets.
+on:
+  pull_request:
+    branches: [master, 'features/**', 'releases/**']
+  push:
+    branches: ['features/**', 'releases/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      # Windows runners cannot run the Linux emulator containers; those tests skip themselves.
+      TTG_SKIP_EMULATORS: ${{ matrix.os == 'windows-latest' && 'true' || 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup .NET (SDK from global.json)
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore TabTabGo.Storage.sln
+
+      - name: Build (warnings are errors)
+        run: dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
+
+      - name: Test with coverage
+        run: dotnet test TabTabGo.Storage.sln -c Release --no-build --collect:"XPlat Code Coverage" --results-directory coverage
+
+      - name: Coverage gate (line 85 / branch 75)
+        if: matrix.os == 'ubuntu-latest'
+        run: python3 scripts/coverage-gate.py coverage
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage
+          if-no-files-found: ignore
+
+      - name: Vulnerable packages (direct and transitive)
+        shell: bash
+        run: |
+          dotnet list TabTabGo.Storage.sln package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
+          if grep -qE "has the following vulnerable packages|^\s+>\s" vulnerable.txt; then echo "vulnerable packages found"; exit 1; fi
+
+      - name: Deprecated packages
+        shell: bash
+        run: |
+          dotnet list TabTabGo.Storage.sln package --deprecated 2>&1 | tee deprecated.txt
+          if grep -qE "has the following deprecated packages" deprecated.txt; then echo "deprecated packages found"; exit 1; fi
+
+      - name: Pack (dry run; package validation and NU5104 run, nothing is pushed)
+        run: dotnet pack TabTabGo.Storage.sln -c Release --no-build -o out
+
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Pinned release asset: the checksum below is verified before the binary runs.
+      GITLEAKS_VERSION: '8.30.1'
+      GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PUSH_BEFORE_SHA: ${{ github.event.before }}
+      EVENT_NAME: ${{ github.event_name }}
+      HEAD_SHA: ${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks (checksum verified)
+        run: |
+          curl -fsSL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+          ./gitleaks version
+
+      - name: Scan the working tree
+        run: ./gitleaks dir . --no-banner --redact --exit-code 1
+
+      - name: Scan the commits of this change
+        run: |
+          zeros='0000000000000000000000000000000000000000'
+          case "$EVENT_NAME" in
+            pull_request) range="${PR_BASE_SHA}..${HEAD_SHA}" ;;
+            push) if [ "$PUSH_BEFORE_SHA" = "$zeros" ] || [ -z "$PUSH_BEFORE_SHA" ]; then range="${HEAD_SHA}"; else range="${PUSH_BEFORE_SHA}..${HEAD_SHA}"; fi ;;
+            *) range="${HEAD_SHA}" ;;
+          esac
+          ./gitleaks git . --no-banner --redact --exit-code 1 --log-opts="$range"

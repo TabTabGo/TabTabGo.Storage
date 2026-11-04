@@ -112,7 +112,7 @@ public class FileServiceReadTests : IDisposable
         await using var result = await _h.Service.GetImage(file.FileId, size);
 
         Assert.Equal((expected, expected), TestImages.SizeOf(ReadAll(result.Stream)));
-        Assert.Empty(_h.Storage.Calls.Where(c => c.StartsWith("Store", StringComparison.Ordinal)));
+        Assert.DoesNotContain(_h.Storage.Calls, c => c.StartsWith("Store", StringComparison.Ordinal));
     }
 
     // V-6
