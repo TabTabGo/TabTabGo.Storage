@@ -255,11 +255,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     {
         ArgumentNullException.ThrowIfNull(content);
         var file = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
-        if (!IsValidToUpdate(file, out var error))
-        {
-            throw new ApiException($"Failed to update file. {error}", null, LogLevel.Warning, 4001,
-                HttpStatusCode.BadRequest, "FILE_INVALID");
-        }
+        EnsureValidToUpdate(file, _ => { }, 4001);
 
         await PreUpdate(file, file, cancellationToken).ConfigureAwait(false);
         var prepared = Prepare(content);
@@ -309,11 +305,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         ArgumentNullException.ThrowIfNull(entity);
         var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
         EnsureDefined(entity.FileType);
-        if (!IsValidToUpdate(entity, out var error))
-        {
-            throw new ApiException($"Failed to update file. {error}", null, LogLevel.Warning, 4001,
-                HttpStatusCode.BadRequest, "FILE_INVALID");
-        }
+        EnsureValidToUpdate(current, merged => FileMetadata<TFile>.CopyFrom(merged, entity), 4001);
 
         await PreUpdate(current, entity, cancellationToken).ConfigureAwait(false);
         var undo = FileMetadata<TFile>.Snapshot(current);
@@ -345,11 +337,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             EnsureDefined(type);
         }
 
-        if (!IsValidToUpdate(current, out var error))
-        {
-            throw new ApiException($"Failed to update file. {error}", null, LogLevel.Warning, 4002,
-                HttpStatusCode.BadRequest, "FILE_INVALID");
-        }
+        EnsureValidToUpdate(current, merged => FileMetadata<TFile>.ApplyJson(merged, entity), 4002);
 
         await PreUpdate(current, entity, cancellationToken).ConfigureAwait(false);
         var undo = FileMetadata<TFile>.Snapshot(current);
@@ -395,11 +383,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         }
 
         var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
-        if (!IsValidToUpdate(current, out var error))
-        {
-            throw new ApiException($"Failed to update file. {error}", null, LogLevel.Warning, 4002,
-                HttpStatusCode.BadRequest, "FILE_INVALID");
-        }
+        EnsureValidToUpdate(current, merged => entity.ApplyTo(merged, PatchFailure), 4002);
 
         await PreUpdate(current, entity, cancellationToken).ConfigureAwait(false);
         var undo = FileMetadata<TFile>.Snapshot(current);
@@ -426,6 +410,29 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     /// <returns>The updated entity.</returns>
     public override Task<TFile> UpdateChanges(long id, TFile entity, CancellationToken cancellationToken) =>
         Update(id, entity, cancellationToken);
+
+    private static void PatchFailure(Microsoft.AspNetCore.JsonPatch.JsonPatchError error) =>
+        throw new ApiException(error.ErrorMessage, null, LogLevel.Warning, null, HttpStatusCode.BadRequest, "INVALID_PATCH");
+
+    // The update gate judges the MERGED entity: a copy of the row loaded by id (database truth for identity, ownership,
+    // audit and storage-owned fields) with only the allow-listed client changes applied. Client-claimed values for the
+    // other fields can therefore never satisfy an authorization or state check.
+    private void EnsureValidToUpdate(TFile current, Action<TFile> applyClientChanges, int errorNumber)
+    {
+        var merged = (TFile)MemberwiseCloneMethod.Invoke(current, null)!;
+        merged.ExtraProperties = current.ExtraProperties is null
+            ? new Dictionary<string, object>()
+            : new Dictionary<string, object>(current.ExtraProperties);
+        applyClientChanges(merged);
+        if (!IsValidToUpdate(merged, out var error))
+        {
+            throw new ApiException($"Failed to update file. {error}", null, LogLevel.Warning, errorNumber,
+                HttpStatusCode.BadRequest, "FILE_INVALID");
+        }
+    }
+
+    private static readonly System.Reflection.MethodInfo MemberwiseCloneMethod =
+        typeof(object).GetMethod("MemberwiseClone", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
 
     private async Task<TFile> FinishUpdateAsync(TFile current, FileType newType, CancellationToken ct)
     {

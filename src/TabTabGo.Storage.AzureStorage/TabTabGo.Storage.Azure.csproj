@@ -11,12 +11,10 @@
 
   <ItemGroup>
     <PackageReference Include="Azure.Storage.Blobs" />
-    <!-- Azure.Core 1.60 (via Azure.Storage.Blobs 12.30.1) requires Microsoft.Extensions.* 10.0.9 even on net8.0,
-         so this package cannot stay on the 8.0.x Extensions line. Reported to the architect. -->
-    <PackageReference Include="Microsoft.Extensions.Options" VersionOverride="10.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" VersionOverride="10.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" VersionOverride="10.0.9" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" VersionOverride="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>

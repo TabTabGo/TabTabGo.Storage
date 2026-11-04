@@ -347,6 +347,75 @@ public class FileServiceValidationHardeningTests : IDisposable
         Assert.Equal("title", _h.Reload(file.FileId).Title);
     }
 
+    // The gate decides on the merged entity: database truth for identity/ownership, client values only where allow-listed.
+    [Fact]
+    public async Task UpdateGate_UsesTheStoredOwner_NotTheOwnerTheClientClaims()
+    {
+        var file = await _h.UploadTextAsync();   // created by "tester"
+        _h.Service.RequireCreatedBy = "owner-x";
+
+        var dto = new File { Title = "x", FileType = FileType.Text, CreatedBy = "owner-x" };   // the client lies about the owner
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _h.Service.Update(file.FileId, dto));
+        var ex2 = await Assert.ThrowsAsync<ApiException>(() => _h.Service.UpdateChanges(file.FileId, dto, CancellationToken.None));
+
+        Assert.Equal("FILE_INVALID", ex.ErrorCode);
+        Assert.Equal("FILE_INVALID", ex2.ErrorCode);
+        Assert.Equal("title", _h.Reload(file.FileId).Title);
+    }
+
+    [Fact]
+    public async Task UpdateGate_IgnoresAClaimedOwner_WhenTheStoredOwnerIsAllowed()
+    {
+        var file = await _h.UploadTextAsync();
+        _h.Service.RequireCreatedBy = "tester";
+
+        await _h.Service.Update(file.FileId, new File { Title = "ok", FileType = FileType.Text, CreatedBy = "attacker" });
+
+        var row = _h.Reload(file.FileId);
+        Assert.Equal("ok", row.Title);
+        Assert.Equal("tester", row.CreatedBy);
+    }
+
+    [Fact]
+    public async Task UpdateGate_Json_UsesTheStoredOwner_AndTheProposedTitle()
+    {
+        var file = await _h.UploadTextAsync();
+        _h.Service.RequireCreatedBy = "owner-x";
+
+        await Assert.ThrowsAsync<ApiException>(() => _h.Service.Update(file.FileId, new JsonObject { ["CreatedBy"] = "owner-x", ["Title"] = "x" }));
+
+        _h.Service.RequireCreatedBy = "tester";
+        _h.Service.VetoTitle = "forbidden";
+        await Assert.ThrowsAsync<ApiException>(() => _h.Service.Update(file.FileId, new JsonObject { ["Title"] = "forbidden" }));
+        Assert.Equal("title", _h.Reload(file.FileId).Title);
+    }
+
+    [Fact]
+    public async Task UpdateGate_Patch_UsesTheStoredOwner()
+    {
+        var file = await _h.UploadTextAsync();
+        _h.Service.RequireCreatedBy = "owner-x";
+        var patch = new Microsoft.AspNetCore.JsonPatch.JsonPatchDocument<File>();
+        patch.Replace(f => f.Title, "x");
+
+        await Assert.ThrowsAsync<ApiException>(() => _h.Service.Update(file.FileId, patch));
+    }
+
+    [Fact]
+    public async Task UpdateGate_DoesNotLeakTheMergedCopyIntoTheRow_WhenVetoed()
+    {
+        var file = await _h.UploadTextAsync();
+        _h.Service.VetoTitle = "forbidden";
+        var dto = new File { Title = "forbidden", Comment = "changed", FileType = FileType.Text };
+
+        await Assert.ThrowsAsync<ApiException>(() => _h.Service.Update(file.FileId, dto));
+
+        var tracked = _h.Db.Context.Set<File>().Local.Single(f => f.FileId == file.FileId);
+        Assert.Equal("title", tracked.Title);
+        Assert.Equal("comment", tracked.Comment);
+    }
+
     // FileType validation
     [Fact]
     public async Task Upload_UndefinedFileType_400_NoContainerCreated()

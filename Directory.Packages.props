@@ -22,7 +22,8 @@
 
   <ItemGroup Label="Providers">
     <PackageVersion Include="AWSSDK.S3" Version="4.0.104.8" />
-    <PackageVersion Include="Azure.Storage.Blobs" Version="12.30.1" />
+    <!-- 12.28+ pulls Azure.Core 1.5x+/System.ClientModel which require Microsoft.Extensions.* and System.Text.Json 10.x on net8.0; v10 keeps 12.30.1. -->
+    <PackageVersion Include="Azure.Storage.Blobs" Version="12.27.0" />
     <PackageVersion Include="SkiaSharp" Version="3.119.4" />
     <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.4" />
   </ItemGroup>

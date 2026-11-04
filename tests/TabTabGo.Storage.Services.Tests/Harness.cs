@@ -96,6 +96,9 @@ public class HookedFileService : FileService<File>
 
     public string? VetoTitle { get; set; }
 
+    /// <summary>Authorization-style hook: only allow updates of rows created by this user (judged on the entity the gate sees).</summary>
+    public string? RequireCreatedBy { get; set; }
+
     public override bool IsValidToCreate(File entity, out string validationErrorMessage)
     {
         Events.Add("IsValidToCreate");
@@ -119,7 +122,8 @@ public class HookedFileService : FileService<File>
     {
         Events.Add("IsValidToUpdate");
         validationErrorMessage = "vetoed";
-        return !RejectUpdate && (VetoTitle is null || entity?.Title != VetoTitle);
+        return !RejectUpdate && (VetoTitle is null || entity?.Title != VetoTitle) &&
+               (RequireCreatedBy is null || entity?.CreatedBy == RequireCreatedBy);
     }
 
     public override Task PreUpdate(File current, File entity, CancellationToken cancellationToken)
