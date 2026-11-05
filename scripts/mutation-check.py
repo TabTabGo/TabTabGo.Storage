@@ -109,6 +109,10 @@ M = [
      " or '\\u2060' or '\\uFEFF' or '\\u2028' or '\\u2029'", "", "zero-width characters kept in names"),
     ("Tracked", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
      "        entity = incomingCopy;", "", "caller-edited tracked instance loses its allow-listed edits"),
+    ("M15", "M", "Aws.Tests", "src/TabTabGo.Storage.Aws/S3ResponseStream.cs",
+     "            _response.Dispose();", "", "S3 response (and its HTTP connection) is not disposed with the stream"),
+    ("M11", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "        if (file.FileType != FileType.Image)\n        {\n            throw NotFound(id);\n        }\n\n        var container", "        var container", "GetImage serves non-images"),
     ("E-6", "M", "Data.EF.Tests", "src/TabTabGo.Storage.Data.EF/StorageModelsBuilder.cs",
      "        modelBuilder.Property(f => f.CreatedBy).IsRequired();", "", "audit-column pin removed (equivalent on v8: Core 8 columns are already required; it only bites on Core 10)"),
 ]

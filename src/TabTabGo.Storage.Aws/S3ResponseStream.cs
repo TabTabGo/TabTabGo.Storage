@@ -5,13 +5,21 @@ namespace TabTabGo.Storage.Aws;
 /// <summary>Read-only stream over an S3 response that disposes the response (and its connection) with the stream.</summary>
 internal sealed class S3ResponseStream : Stream
 {
-    private readonly GetObjectResponse _response;
+    private readonly IDisposable _owner;
     private readonly Stream _inner;
+    private readonly long _contentLength;
 
     public S3ResponseStream(GetObjectResponse response)
+        : this(response.ResponseStream, response, response.ContentLength)
     {
-        _response = response;
-        _inner = response.ResponseStream;
+    }
+
+    // The owner is what holds the HTTP connection (the response); it is disposed with the stream.
+    internal S3ResponseStream(Stream inner, IDisposable owner, long contentLength)
+    {
+        _inner = inner;
+        _owner = owner;
+        _contentLength = contentLength;
     }
 
     public override bool CanRead => true;
@@ -20,7 +28,7 @@ internal sealed class S3ResponseStream : Stream
 
     public override bool CanWrite => false;
 
-    public override long Length => _inner.CanSeek ? _inner.Length : _response.ContentLength;
+    public override long Length => _inner.CanSeek ? _inner.Length : _contentLength;
 
     public override long Position
     {
@@ -53,7 +61,7 @@ internal sealed class S3ResponseStream : Stream
         if (disposing)
         {
             _inner.Dispose();
-            _response.Dispose();
+            _owner.Dispose();
         }
 
         base.Dispose(disposing);

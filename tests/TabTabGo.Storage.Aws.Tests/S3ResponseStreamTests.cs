@@ -18,6 +18,41 @@ public class S3ResponseStreamTests
         }
     }
 
+    private sealed class TrackingOwner : IDisposable
+    {
+        public bool Disposed { get; private set; }
+
+        public void Dispose() => Disposed = true;
+    }
+
+    // The response owns the HTTP connection: disposing the stream must dispose the OWNER (the response), not only the body stream.
+    [Fact]
+    public void DisposingTheStream_DisposesTheOwningResponse_NotJustItsBody()
+    {
+        var owner = new TrackingOwner();
+        var inner = new TrackingStream([1, 2]);
+        var stream = new S3ResponseStream(inner, owner, 2);
+        Assert.False(owner.Disposed);
+
+        stream.Dispose();
+
+        Assert.True(owner.Disposed);
+        Assert.True(inner.IsDisposed);
+    }
+
+    [Fact]
+    public void Length_FallsBackToTheResponseContentLength_WhenTheBodyCannotSeek()
+    {
+        var stream = new S3ResponseStream(new ForwardOnly([1, 2, 3]), new TrackingOwner(), 3);
+
+        Assert.Equal(3, stream.Length);
+    }
+
+    private sealed class ForwardOnly(byte[] data) : MemoryStream(data)
+    {
+        public override bool CanSeek => false;
+    }
+
     [Fact]
     public async Task OpenRead_DisposingTheStream_DisposesTheGetObjectResponseStream()
     {

@@ -166,6 +166,18 @@ public class FileServiceReadTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, ex.HttpStatusCode);
     }
 
+    // QA M11: a non-image must be refused for the default size as well, not only for thumbnails.
+    [Fact]
+    public async Task GetImage_DefaultSize_OfANonImage_404()
+    {
+        var file = await _h.UploadTextAsync();
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _h.Service.GetImage(file.FileId));
+
+        Assert.Equal(HttpStatusCode.NotFound, ex.HttpStatusCode);
+        Assert.DoesNotContain(_h.Storage.Calls, c => c.StartsWith("Store", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task GetImage_OriginalMissing_404()
     {
