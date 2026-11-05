@@ -165,6 +165,15 @@ public class TenantFile : Entity, IFile
     public long TenantId { get; set; }
 
     public string? OwnerEmail { get; set; }
+
+    public Tenant? Tenant { get; set; }
+}
+
+public class Tenant
+{
+    public long Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
 }
 
 public sealed class TenantFileService(IUnitOfWork uow, InMemoryStorageProvider storage)
@@ -195,6 +204,9 @@ public class FileServiceFullRestoreTests : IDisposable
         _connection.Open();
         _context = new TenantContext(new DbContextOptionsBuilder<TenantContext>().UseSqlite(_connection).Options);
         _context.Database.EnsureCreated();
+        _context.AddRange(new Tenant { Id = 1, Name = "attacker" }, new Tenant { Id = 2, Name = "victim" });
+        _context.SaveChanges();
+        _context.ChangeTracker.Clear();
         _service = new TenantFileService(new TestUnitOfWork(_context), _storage);
     }
 
@@ -284,10 +296,13 @@ public class FileServiceFullRestoreTests : IDisposable
 
     private sealed class TenantContext(DbContextOptions<TenantContext> options) : DbContext(options)
     {
-        protected override void OnModelCreating(ModelBuilder modelBuilder) =>
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Tenant>(t => t.HasKey(x => x.Id));
             modelBuilder.Entity<TenantFile>(e =>
             {
                 e.HasKey(f => f.FileId);
+                e.HasOne(f => f.Tenant).WithMany().HasForeignKey(f => f.TenantId).IsRequired().OnDelete(DeleteBehavior.Restrict);
                 e.Property(f => f.FileId).ValueGeneratedOnAdd();
                 e.Property(f => f.FileType).HasConversion(f => (int)f, f => (FileType)f);
                 e.Property(f => f.CreatedBy).IsRequired();
@@ -297,6 +312,7 @@ public class FileServiceFullRestoreTests : IDisposable
                     v => System.Text.Json.JsonSerializer.Deserialize<IDictionary<string, object>>(v, (System.Text.Json.JsonSerializerOptions?)null)
                          ?? new Dictionary<string, object>());
             });
+        }
     }
 }
 

@@ -106,6 +106,8 @@ public class HookedFileService : FileService<File>
 
     public long? PreUpdateCurrentReferenceId { get; set; }
 
+    public string? SetUpdatedByInPreUpdate { get; set; }
+
     public (string Extension, string Name, string Path, long? Size, int Extra)? CreateSeen { get; private set; }
 
     /// <summary>Authorization-style hook: only allow updates of rows created by this user (judged on the entity the gate sees).</summary>
@@ -143,6 +145,11 @@ public class HookedFileService : FileService<File>
     public override Task PreUpdate(File current, File entity, CancellationToken cancellationToken)
     {
         PreUpdateCurrentReferenceId = current.ReferenceId;
+        if (SetUpdatedByInPreUpdate is not null)
+        {
+            current.UpdatedBy = SetUpdatedByInPreUpdate;
+        }
+
         Events.Add("PreUpdate");
         return Task.CompletedTask;
     }

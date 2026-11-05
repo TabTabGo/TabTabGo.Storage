@@ -24,6 +24,12 @@ public class StorageServiceOptions
     /// </summary>
     public bool AllowMetadataExtraProperties { get; set; }
 
+    /// <summary>Most keys an <c>ExtraProperties</c> bag may hold after an upload or update (400 above). Defaults to 32.</summary>
+    public int MaxExtraPropertyKeys { get; set; } = 32;
+
+    /// <summary>Largest serialized size in bytes of an <c>ExtraProperties</c> bag (400 above). Defaults to 16 KiB.</summary>
+    public int MaxExtraPropertiesBytes { get; set; } = 16 * 1024;
+
     /// <summary>Largest accepted upload in bytes. Defaults to 50 MiB; <c>null</c> means no limit.</summary>
     public long? MaxFileSizeBytes { get; set; } = 50L * 1024 * 1024;
 }

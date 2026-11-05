@@ -495,13 +495,14 @@ public class FileServiceReplaceAndUpdateTests : IDisposable
     [Fact]
     public async Task Update_Entity_CopiesAllowListedFields()
     {
-        var file = await _h.UploadTextAsync();
+        using var h = new FileServiceHarness(o => o.AllowMetadataExtraProperties = true);
+        var file = await h.UploadTextAsync();
         var update = new File { Title = "T2", Comment = "C2", ReferenceType = "Order", ReferenceId = 55, Duration = 12, FileType = FileType.Text };
         update.ExtraProperties["k"] = "v";
 
-        await _h.Service.Update(file.FileId, update);
+        await h.Service.Update(file.FileId, update);
 
-        var stored = _h.Reload(file.FileId);
+        var stored = h.Reload(file.FileId);
         Assert.Equal("T2", stored.Title);
         Assert.Equal("C2", stored.Comment);
         Assert.Equal("Order", stored.ReferenceType);
@@ -584,12 +585,13 @@ public class FileServiceReplaceAndUpdateTests : IDisposable
     [Fact]
     public async Task Update_ExtraProperties_Merged()
     {
-        var file = await _h.UploadTextAsync();
-        await _h.Service.Update(file.FileId, JsonNode.Parse("""{"ExtraProperties":{"a":1,"b":"x"}}""")!.AsObject());
+        using var h = new FileServiceHarness(o => o.AllowMetadataExtraProperties = true);
+        var file = await h.UploadTextAsync();
+        await h.Service.Update(file.FileId, JsonNode.Parse("""{"ExtraProperties":{"a":1,"b":"x"}}""")!.AsObject());
 
-        await _h.Service.Update(file.FileId, JsonNode.Parse("""{"ExtraProperties":{"b":"y","c":true,"d":null}}""")!.AsObject());
+        await h.Service.Update(file.FileId, JsonNode.Parse("""{"ExtraProperties":{"b":"y","c":true,"d":null}}""")!.AsObject());
 
-        var extra = _h.Reload(file.FileId).ExtraProperties;
+        var extra = h.Reload(file.FileId).ExtraProperties;
         Assert.Equal("1", extra["a"].ToString());
         Assert.Equal("y", extra["b"].ToString());
         Assert.Equal("True", extra["c"].ToString(), ignoreCase: true);

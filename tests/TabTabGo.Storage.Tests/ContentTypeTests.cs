@@ -172,6 +172,35 @@ public class ContentDispositionFormatterTests
         Assert.DoesNotContain(invisible, value, StringComparison.Ordinal);
     }
 
+    // G: the Unicode "format" (Cf) category is invisible as a whole, not just the characters we thought of first.
+    [Theory]
+    [InlineData('\u00AD')]
+    [InlineData('\u061C')]
+    [InlineData('\u180E')]
+    [InlineData('\u2061')]
+    [InlineData('\u2062')]
+    [InlineData('\u2063')]
+    [InlineData('\u2064')]
+    [InlineData('\u206A')]
+    [InlineData('\u206F')]
+    public void Format_AnyFormatCharacter_IsRemoved(char invisible)
+    {
+        var value = ContentDispositionFormatter.Format($"pay{invisible}roll.pdf");
+
+        Assert.Contains("filename=\"payroll.pdf\"", value);
+        Assert.True(ContentDispositionFormatter.IsInvisibleControl(invisible));
+        Assert.DoesNotContain(invisible.ToString(), value, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData('a')]
+    [InlineData(' ')]
+    [InlineData('-')]
+    [InlineData('\u00E9')]
+    [InlineData('\u4E2D')]
+    public void IsInvisibleControl_LeavesVisibleCharactersAlone(char visible) =>
+        Assert.False(ContentDispositionFormatter.IsInvisibleControl(visible));
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
