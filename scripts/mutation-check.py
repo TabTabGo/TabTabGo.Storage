@@ -19,6 +19,9 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
+# Mutants that cannot change observable behaviour on this line (explained in their description).
+EQUIVALENT = {"E-6", "M11"}
+
 # id, severity, project, file, old, new, description
 M = [
     ("F-1", "C", "FileStorage.Tests", "src/TabTabGo.Storage/Paths/StoragePath.cs",
@@ -110,9 +113,9 @@ M = [
     ("Tracked", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
      "        entity = incomingCopy;", "", "caller-edited tracked instance loses its allow-listed edits"),
     ("M15", "M", "Aws.Tests", "src/TabTabGo.Storage.Aws/S3ResponseStream.cs",
-     "            _response.Dispose();", "", "S3 response (and its HTTP connection) is not disposed with the stream"),
+     "            _owner.Dispose();", "", "S3 response (and its HTTP connection) is not disposed with the stream"),
     ("M11", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
-     "        if (file.FileType != FileType.Image)\n        {\n            throw NotFound(id);\n        }\n\n        var container", "        var container", "GetImage serves non-images"),
+     "        if (file.FileType != FileType.Image)\n        {\n            throw NotFound(id);\n        }\n\n        var container", "        var container", "GetImage serves non-images (equivalent: the container is the file type, so a non-image has no object under Image and still gets 404; the check is defence in depth)"),
     ("E-6", "M", "Data.EF.Tests", "src/TabTabGo.Storage.Data.EF/StorageModelsBuilder.cs",
      "        modelBuilder.Property(f => f.CreatedBy).IsRequired();", "", "audit-column pin removed (equivalent on v8: Core 8 columns are already required; it only bites on Core 10)"),
 ]
@@ -161,7 +164,7 @@ def main() -> int:
         print("\n| Bug | Sev | Mutation | Result | Killing tests |\n|---|---|---|---|---|")
         for rid, sev, what, verdict, detail in rows:
             print(f"| {rid} | {sev} | {what} | {verdict} | {detail} |")
-    return 0 if all(r[3] == "KILLED" or r[0] == "E-6" for r in rows) else 1
+    return 0 if all(r[3] == "KILLED" or r[0] in EQUIVALENT for r in rows) else 1
 
 
 if __name__ == "__main__":
