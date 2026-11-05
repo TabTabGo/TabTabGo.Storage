@@ -72,7 +72,7 @@ internal static class FileMetadata<TFile>
     public static bool Has(string name) => typeof(TFile).GetProperty(name) is not null;
 
     /// <summary>Copies the allow-listed fields of a whole-entity update. Null strings keep the current value.</summary>
-    public static void CopyFrom(TFile target, TFile source)
+    public static void CopyFrom(TFile target, TFile source, bool allowExtraProperties)
     {
         if (source.Title is not null)
         {
@@ -87,12 +87,15 @@ internal static class FileMetadata<TFile>
         CopyProperty(ReferenceType, target, source, skipNull: true);
         CopyProperty(ReferenceId, target, source, skipNull: false);
         CopyProperty(Duration, target, source, skipNull: false);
-        MergeExtra(target, source.ExtraProperties);
+        if (allowExtraProperties)
+        {
+            MergeExtra(target, source.ExtraProperties);
+        }
     }
 
     /// <summary>Applies the allow-listed members of a JSON document; every other member is ignored.</summary>
     /// <returns>The requested file type, when the document carries one.</returns>
-    public static FileType? ApplyJson(TFile target, JsonObject json)
+    public static FileType? ApplyJson(TFile target, JsonObject json, bool allowExtraProperties)
     {
         FileType? requested = null;
         foreach (var (name, node) in json)
@@ -126,7 +129,7 @@ internal static class FileMetadata<TFile>
 
                     break;
                 case "extraproperties":
-                    if (node is JsonObject extra)
+                    if (allowExtraProperties && node is JsonObject extra)
                     {
                         foreach (var (key, value) in extra)
                         {

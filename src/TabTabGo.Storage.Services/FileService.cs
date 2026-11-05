@@ -251,6 +251,10 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         {
             metadata.ExtraProperties = new Dictionary<string, object>();
         }
+        else
+        {
+            EnsureExtraPropertiesWithinLimits(metadata.ExtraProperties);
+        }
 
         // The hooks below judge what is really being stored, not what the metadata claims.
         metadata.FileExtension = prepared.Extension;
@@ -299,6 +303,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         var oldType = file.FileType;
         var previous = new StoredContent(file.FilePath, file.FileSize ?? 0, file.FileExtension, file.OriginalFileName,
             file.OriginalMediaType);
+        var previousUpdated = file.UpdatedDate;
 
         var stored = new List<StoredObject>();
         try
@@ -306,6 +311,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             var result = await StoreContentAsync(file.FileType, content, prepared, stored, cancellationToken)
                 .ConfigureAwait(false);
             ApplyStorageFields(file, result);
+            file.UpdatedDate = _timeProvider.GetUtcNow();
             await Repo.UpdateAsync(file, cancellationToken).ConfigureAwait(false);
             await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -313,6 +319,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         {
             // The row still points at the old objects; keep the in-memory entity consistent with that.
             ApplyStorageFields(file, previous);
+            file.UpdatedDate = previousUpdated;
             await CleanupAsync(stored).ConfigureAwait(false);
             throw;
         }
@@ -347,13 +354,13 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         entity = incomingCopy;
         var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
         EnsureDefined(entity.FileType);
-        EnsureValidToUpdate(current, merged => FileMetadata<TFile>.CopyFrom(merged, entity), 4001);
+        EnsureValidToUpdate(current, merged => FileMetadata<TFile>.CopyFrom(merged, entity, _options.AllowMetadataExtraProperties), 4001);
 
         await PreUpdate(current, entity, cancellationToken).ConfigureAwait(false);
         var undo = FileMetadata<TFile>.Snapshot(current);
         try
         {
-            FileMetadata<TFile>.CopyFrom(current, entity);
+            FileMetadata<TFile>.CopyFrom(current, entity, _options.AllowMetadataExtraProperties);
             var newType = entity.FileType == FileType.Unknown ? current.FileType : entity.FileType;
             return await FinishUpdateAsync(current, newType, cancellationToken).ConfigureAwait(false);
         }
@@ -379,13 +386,13 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             EnsureDefined(type);
         }
 
-        EnsureValidToUpdate(current, merged => FileMetadata<TFile>.ApplyJson(merged, entity), 4002);
+        EnsureValidToUpdate(current, merged => FileMetadata<TFile>.ApplyJson(merged, entity, _options.AllowMetadataExtraProperties), 4002);
 
         await PreUpdate(current, entity, cancellationToken).ConfigureAwait(false);
         var undo = FileMetadata<TFile>.Snapshot(current);
         try
         {
-            FileMetadata<TFile>.ApplyJson(current, entity);
+            FileMetadata<TFile>.ApplyJson(current, entity, _options.AllowMetadataExtraProperties);
             var newType = requested is null or FileType.Unknown ? current.FileType : requested.Value;
             return await FinishUpdateAsync(current, newType, cancellationToken).ConfigureAwait(false);
         }
@@ -415,6 +422,13 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             {
                 throw new ApiException($"The field '{first}' cannot be changed by an update.", null, LogLevel.Warning,
                     null, HttpStatusCode.BadRequest, "FIELD_NOT_UPDATABLE");
+            }
+
+            if (!_options.AllowMetadataExtraProperties &&
+                string.Equals(first, nameof(IFile.ExtraProperties), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ApiException("ExtraProperties cannot be changed by an update (StorageServiceOptions.AllowMetadataExtraProperties is off).",
+                    null, LogLevel.Warning, null, HttpStatusCode.BadRequest, "FIELD_NOT_UPDATABLE");
             }
 
             if (string.Equals(first, nameof(IFile.FileType), StringComparison.OrdinalIgnoreCase))
@@ -466,6 +480,23 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     public virtual bool IsValidToUpdate(TFile current, TFile merged, out string validationErrorMessage) =>
         IsValidToUpdate(current, out validationErrorMessage) && IsValidToUpdate(merged, out validationErrorMessage);
 
+    // Bounds the ExtraProperties bag (key count and serialized size) so a request body cannot grow a row without limit.
+    private void EnsureExtraPropertiesWithinLimits(IDictionary<string, object>? bag)
+    {
+        if (bag is null || bag.Count == 0)
+        {
+            return;
+        }
+
+        if (bag.Count > _options.MaxExtraPropertyKeys ||
+            System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(bag).Length > _options.MaxExtraPropertiesBytes)
+        {
+            throw new ApiException(
+                $"ExtraProperties may hold at most {_options.MaxExtraPropertyKeys} keys and {_options.MaxExtraPropertiesBytes} bytes.",
+                null, LogLevel.Warning, null, HttpStatusCode.BadRequest, "EXTRA_PROPERTIES_TOO_LARGE");
+        }
+    }
+
     private static void PatchFailure(Microsoft.AspNetCore.JsonPatch.JsonPatchError error) =>
         throw new ApiException(error.ErrorMessage, null, LogLevel.Warning, null, HttpStatusCode.BadRequest, "INVALID_PATCH");
 
@@ -479,6 +510,11 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             ? new Dictionary<string, object>()
             : new Dictionary<string, object>(current.ExtraProperties);
         applyClientChanges(merged);
+        if (_options.AllowMetadataExtraProperties)
+        {
+            EnsureExtraPropertiesWithinLimits(merged.ExtraProperties);
+        }
+
         if (!IsValidToUpdate(current, merged, out var error))
         {
             throw new ApiException($"Failed to update file. {error}", null, LogLevel.Warning, errorNumber,
@@ -492,6 +528,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     private async Task<TFile> FinishUpdateAsync(TFile current, FileType newType, CancellationToken ct)
     {
         var oldType = current.FileType;
+        var oldUpdated = current.UpdatedDate;
         var created = new List<StoredObject>();
         try
         {
@@ -501,12 +538,16 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
                 current.FileType = newType;
             }
 
+            // UpdatedBy is the host's (set it on `current` in PreUpdate, or in a SaveChanges interceptor).
+            current.UpdatedDate = _timeProvider.GetUtcNow();
+
             await Repo.UpdateAsync(current, ct).ConfigureAwait(false);
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
         }
         catch
         {
             current.FileType = oldType;
+            current.UpdatedDate = oldUpdated;
             await CleanupAsync(created).ConfigureAwait(false);
             throw;
         }
@@ -567,6 +608,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         EnsureAllDeletable([file]);
         await PreDelete(file, cancellationToken).ConfigureAwait(false);
         file.IsEnabled = false;
+        file.UpdatedDate = _timeProvider.GetUtcNow();
         await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         await PostDelete(file, cancellationToken).ConfigureAwait(false);
         return file;
@@ -587,6 +629,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         foreach (var file in files)
         {
             file.IsEnabled = false;
+            file.UpdatedDate = _timeProvider.GetUtcNow();
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -690,6 +733,29 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     public virtual bool IsValidToPurge(TFile entity, out string validationErrorMessage) =>
         IsValidToDelete(entity, out validationErrorMessage);
 
+    /// <summary>Whether the file exists, is not soft-deleted, and may be deleted. A missing or disabled file is <c>false</c>.</summary>
+    /// <param name="id">File id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> when <see cref="Delete(long, CancellationToken)"/> would be allowed.</returns>
+    public override async Task<bool> CanDelete(long id, CancellationToken cancellationToken = default)
+    {
+        var file = await FindAsync(id, cancellationToken).ConfigureAwait(false);
+        return file is not null && IsValidToDelete(file, out _);
+    }
+
+    /// <summary>True only when every id exists, is not soft-deleted, and may be deleted.</summary>
+    /// <param name="ids">File ids.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> when <c>Delete(ids)</c> would delete all of them.</returns>
+    public override async Task<bool> CanDelete(IEnumerable<long> ids, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        var idList = ids.Distinct().ToList();
+        var files = (await Repo.GetAsync(f => idList.Contains(f.FileId) && f.IsEnabled, flags: QueryFlags.DisableTracking,
+            cancellationToken: cancellationToken).ConfigureAwait(false)).ToList();
+        return files.Count == idList.Count && files.All(f => IsValidToDelete(f, out _));
+    }
+
     // Every delete overload rejects the whole operation when any file fails IsValidToDelete, before anything changes.
     private void EnsureAllDeletable(IEnumerable<TFile> files, bool purge = false)
     {
@@ -736,6 +802,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         var truth = await Repo.FirstOrDefaultAsync(key, flags: QueryFlags.DisableTracking, cancellationToken: ct)
             .ConfigureAwait(false) ?? throw NotFound(id);
         RestoreOwned(tracked, truth);
+        EnsureNoPendingNavigationChange(tracked, truth);
         return tracked;
     }
 
@@ -755,10 +822,29 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             if (truth.TryGetValue(file.FileId, out var fromDb))
             {
                 RestoreOwned(file, fromDb);
+                EnsureNoPendingNavigationChange(file, fromDb);
             }
         }
 
         return tracked;
+    }
+
+    // A reference navigation that was edited on the tracked instance becomes a foreign-key change when EF detects changes at
+    // save time, even though the scalar was restored above. Force the detection now and compare: if a scalar moved away from
+    // the database value again, refuse (409) instead of judging or persisting it. Collection navigations cannot be seen
+    // through IUnitOfWork; see the README's accepted limits.
+    private void EnsureNoPendingNavigationChange(TFile tracked, TFile truth)
+    {
+        _ = _unitOfWork.GetChanges();
+        foreach (var property in ScalarProperties)
+        {
+            if (!Equals(property.GetValue(tracked), property.GetValue(truth)))
+            {
+                throw new ApiException(
+                    $"The tracked file {truth.FileId} has pending changes that the service refuses to judge or save (a navigation property was edited).",
+                    null, LogLevel.Warning, null, HttpStatusCode.Conflict, "TRACKED_STATE_CONFLICT");
+            }
+        }
     }
 
     private static readonly System.Reflection.PropertyInfo[] ScalarProperties = typeof(TFile)
