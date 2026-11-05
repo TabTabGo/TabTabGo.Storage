@@ -21,6 +21,8 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -82,6 +84,34 @@ def sha256(path: pathlib.Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+DOWNLOAD_TIMEOUT_SECONDS = 60
+DOWNLOAD_ATTEMPTS = 3
+
+
+def download(url: str, dest: pathlib.Path, opener=urllib.request.urlopen, sleep=time.sleep) -> None:
+    """Download url to dest. Each attempt has a 60 s socket timeout (connect and every read); 3 attempts with 2 s / 4 s backoff.
+
+    A stalled transfer used to hang for hours because urlretrieve has no timeout. The file is written to a temporary name and
+    renamed only when complete, so a failed attempt never leaves a partial package behind.
+    """
+    partial = dest.with_name(dest.name + ".part")
+    last = None
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            with opener(url, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
+                data = response.read()
+            partial.write_bytes(data)
+            partial.replace(dest)
+            return
+        except (OSError, urllib.error.URLError) as error:  # socket.timeout and URLError are OSError subclasses
+            last = error
+            partial.unlink(missing_ok=True)
+            if attempt < DOWNLOAD_ATTEMPTS:
+                sleep(2 ** attempt)
+    sys.exit(f"Could not download {url} after {DOWNLOAD_ATTEMPTS} attempts "
+             f"({DOWNLOAD_TIMEOUT_SECONDS} s timeout each): {last}. Check the network or proxy and rerun.")
+
+
 def fetch(package: str) -> pathlib.Path:
     dest = CACHE / package
     marker = dest / ".done"
@@ -92,7 +122,7 @@ def fetch(package: str) -> pathlib.Path:
     if not marker.exists():
         dest.mkdir(parents=True, exist_ok=True)
         url = f"https://api.nuget.org/v3-flatcontainer/{package.lower()}/{BASELINE}/{package.lower()}.{BASELINE}.nupkg"
-        urllib.request.urlretrieve(url, nupkg)
+        download(url, nupkg)
         if sha256(nupkg) != expected:
             sys.exit(f"{package} {BASELINE}: downloaded package does not match the pinned SHA-256 {expected}")
         with zipfile.ZipFile(nupkg) as z:
