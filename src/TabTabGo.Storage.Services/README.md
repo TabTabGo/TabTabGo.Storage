@@ -16,7 +16,7 @@ The host also registers an `IStorageProvider` (one of the provider packages) and
 |---|---|
 | `Upload(metadata, FileUpload)` | validates, stores the original (and thumbnails for images), inserts the row. If the insert fails the stored objects are removed. The client cannot choose the storage fields. |
 | `Replace(id, FileUpload)` | stores new content, switches the row, removes the old objects from the container of the stored type |
-| `Update(id, TFile)` / `Update(id, JsonObject)` / JSON patch | allow-list only: `Title`, `Comment`, `ReferenceType`, `ReferenceId`, `Duration`, `FileType`, `ExtraProperties` (merged). Changing `FileType` moves the object to the new type's container. |
+| `Update(id, TFile)` / `Update(id, JsonObject)` / JSON patch | allow-list only: `Title`, `Comment`, `ReferenceType`, `ReferenceId`, `Duration`, `FileType`, and `ExtraProperties` **only when `StorageServiceOptions.AllowMetadataExtraProperties` is on** (default off: ignored by the entity and JSON forms, 400 `FIELD_NOT_UPDATABLE` for a patch on `/ExtraProperties`; when on it is merged and bounded by `MaxExtraPropertyKeys` (32) and `MaxExtraPropertiesBytes` (16 KiB), 400 `EXTRA_PROPERTIES_TOO_LARGE`; the same limits apply to `Upload`). Changing `FileType` moves the object to the new type's container. |
 | `Delete(id)`, `Delete(ids)` | **soft delete** (`IsEnabled = false`), objects kept, as in 6.x and Core. "Delete" means "hide": a soft-deleted file is 404 for every read and mutation by id and is also excluded from the inherited Core reads (`GetByKey`, `Exists`, `GetList`, `GetPageList`, OData, `GetViewModels`) |
 | `Delete(predicate)` | hard-deletes the matching rows (as in 6.x), then removes their objects and thumbnails |
 | `Purge(id)`, `Purge(ids)` | explicit hard delete of rows (soft-deleted ones too) and then their objects and thumbnails; on the class, not on `IFileService`. Gated by `IsValidToPurge` (defaults to `IsValidToDelete`) and by `PreDelete(file)` / `PostDelete(file)` |
@@ -57,6 +57,22 @@ Thumbnail paths are `ThumbLarge|ThumbMedium|ThumbSmall/<original path>`.
 ```csharp
 await fileService.Upload(new File { FileType = FileType.PDF, CreatedBy = user }, formFile.ToFileUpload());
 ```
+
+## Audit fields, deletes and what is restored
+
+- `UpdatedDate` is set from the `TimeProvider` on every successful `Update*`, `Replace` and soft `Delete`. `UpdatedBy` is the host's:
+  set it on `current` inside `PreUpdate`, or in your `SaveChanges` interceptor.
+- Bulk deletes call the collection hook (`PreDelete(IEnumerable)` / `PostDelete(IEnumerable)`) **once per operation** and then the
+  per-file hook (`PreDelete(file)` / `PostDelete(file)`) **once per file**, in that order; single deletes and `Purge(id)` call only the
+  per-file hook. Do not repeat the same logic in both: use the collection hook for batch concerns, the per-file hook for gates.
+- `CanDelete(id)` and `CanDelete(ids)` return `false` for a missing or soft-deleted file (Core returns `true`).
+- There is no `Restore`: a soft delete is undone in the database (`IsEnabled = 1`) or by a host-written method that sets it on a
+  freshly loaded row. `Purge` is the only way to remove the objects.
+- Before every mutation every writable scalar property of `TFile` is restored from the database. Edge cases: reference and collection
+  navigations, class-typed (owned) properties and `byte[]` are **not** restored; shadow properties and concurrency tokens are
+  untouched; a writable `[NotMapped]` scalar is reset too, so recompute it in `PostUpdate`. An edited **reference navigation** that
+  would change a foreign key is detected (the service forces EF change detection and compares the scalars again) and refused with
+  409 `TRACKED_STATE_CONFLICT`; edited **collection** navigations cannot be seen through `IUnitOfWork` (see the solution README).
 
 ## Known limits
 

@@ -112,7 +112,9 @@ Every provider passes the same contract suite:
 | Container names are lower-cased with the invariant culture (6.x used the current culture: under tr-TR `Image` became `mage`) | a 6.x host that ran under a Turkish or Azerbaijani culture may have data in `mage`; copy it to `image` |
 | Soft-deleted files are hidden from the inherited Core reads too; `Purge` is gated by `IsValidToPurge` and `PreDelete(file)` | none |
 | Bulk deletes (`Delete(ids)`, `Delete(query)`, `Purge(ids)`) now also call the single-entity `PreDelete(file)` / `PostDelete(file)` | hosts that count hook calls |
-| `Upload`: `ExtraProperties` of the metadata are cleared unless `AllowMetadataExtraProperties` is set; `IsCompressed` is `false` | set the option if you rely on metadata extras |
+| `ExtraProperties` of an upload **and of an update** are ignored unless `AllowMetadataExtraProperties` is set (then bounded to 32 keys / 16 KiB, 400 above); `IsCompressed` is `false` | set the option and the limits if you rely on client-supplied extras (spec row SB32) |
+| `UpdatedDate` is set by the service on update, replace and soft delete; `CanDelete` is `false` for a missing or soft-deleted file | set `UpdatedBy` in `PreUpdate` or in your interceptor |
+| An edited reference navigation on a tracked file is refused with 409 `TRACKED_STATE_CONFLICT` | do not edit tracked entities before calling the service |
 | `StorageServiceOptions.MaxFileSizeBytes` defaults to 50 MiB and `ImageServiceOptions.MaxPixels` to 25 000 000 | raise them explicitly if you accept larger files |
 | GIF/BMP/ICO thumbnails are PNG; JPEG quality 90 | none |
 | `Delete(id)` / `Delete(ids)` are still **soft deletes** (`IsEnabled = false`, objects kept); a soft-deleted file is now hidden from every read and mutation by id | none. New: `FileService<TFile>.Purge(id)` / `Purge(ids)` hard-delete the row and remove the objects (class only, not on `IFileService`); `Delete(query)` stays a hard delete as in 6.x |
@@ -161,6 +163,10 @@ environment-scoped API key as the only fallback. CI (`ci.yml`) never publishes.
 - Two concurrent requests for the same missing thumbnail may both generate and store it (identical bytes, last write wins).
 - Thumbnail keys written by 6.x with a backslash separator cannot be addressed through `StoragePath`, so `Delete(query)` and
   `Purge` do not remove them.
+- Edited **collection** navigations of a host `TFile` (for example a many-to-many tag list) cannot be detected through
+  `IUnitOfWork`; they are neither restored nor refused. Contexts are per request: do not let untrusted code edit tracked entities
+  before calling the service.
+- Unicode "format" (Cf) characters are stripped from names, including ZWJ inside emoji sequences, so such names lose the joiner.
 - Azure containers must never be derived from user input: a container name is configuration, not a request field.
 - A 6.x host that ran under a Turkish or Azerbaijani culture may hold data in a container named `mage` (6.x lower-cased
   `Image` with the dotless i); v8 lower-cases invariantly, so that data is not found under `image` and has to be copied.
