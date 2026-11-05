@@ -51,6 +51,45 @@ public static class ContentDispositionFormatter
         IsBidiControl(c) || char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Format ||
         c is >= '\u200B' and <= '\u200D' or '\u2060' or '\uFEFF' or '\u2028' or '\u2029';
 
+    /// <summary>
+    /// Removes from a name every control character, DEL, every invisible or reordering character (see
+    /// <see cref="IsInvisibleControl"/>), every Unicode "format" (Cf) code point including those outside the BMP (tag
+    /// characters U+E0000-E007F, musical format controls U+1D173-1D17A, ...), and lone surrogates. The string is walked by
+    /// code point, so a valid surrogate pair (an emoji) is kept or dropped as a whole.
+    /// </summary>
+    /// <param name="value">Name to clean.</param>
+    /// <param name="keepQuote">Whether the double quote is kept (it is removed for Content-Disposition).</param>
+    /// <returns>The cleaned name (not trimmed).</returns>
+    public static string StripInvisible(string value, bool keepQuote = true)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        var builder = new StringBuilder(value.Length);
+        for (var i = 0; i < value.Length; i++)
+        {
+            var c = value[i];
+            if (char.IsHighSurrogate(c) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
+            {
+                var rune = new Rune(c, value[i + 1]);
+                if (Rune.GetUnicodeCategory(rune) != System.Globalization.UnicodeCategory.Format)
+                {
+                    builder.Append(c).Append(value[i + 1]);
+                }
+
+                i++;
+                continue;
+            }
+
+            if (char.IsSurrogate(c) || c < ' ' || c == '\u007f' || (!keepQuote && c == '"') || IsInvisibleControl(c))
+            {
+                continue;
+            }
+
+            builder.Append(c);
+        }
+
+        return builder.ToString();
+    }
+
     private static string Clean(string? fileName)
     {
         if (string.IsNullOrEmpty(fileName))
@@ -60,18 +99,7 @@ public static class ContentDispositionFormatter
 
         var name = fileName.Replace('\\', '/');
         name = name[(name.LastIndexOf('/') + 1)..];
-        var builder = new StringBuilder(name.Length);
-        foreach (var c in name)
-        {
-            if (c < ' ' || c == '\u007f' || c == '"' || IsInvisibleControl(c))
-            {
-                continue;
-            }
-
-            builder.Append(c);
-        }
-
-        return builder.ToString().Trim();
+        return StripInvisible(name, keepQuote: false).Trim();
     }
 
     private static string EncodeRfc5987(string value)

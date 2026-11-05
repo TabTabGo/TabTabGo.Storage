@@ -136,6 +136,10 @@ M = [
      "includeProperties, ActiveFilter.And(fixCriteria), flags);", "includeProperties, fixCriteria, flags);", "OData reads pass the caller's criteria without the active filter (soft-deleted rows returned)"),
     ("R4-B2", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
      "base.GetList(ActiveFilter.And<TFile>(query!)!, includeProperties", "base.GetList(query!, includeProperties", "GetList returns soft-deleted rows"),
+    ("R5-G1", "M", "Tests", "src/TabTabGo.Storage/ContentTypes/ContentDispositionFormatter.cs",
+     "Rune.GetUnicodeCategory(rune) != System.Globalization.UnicodeCategory.Format", "true", "non-BMP format characters (tag characters, musical controls) survive"),
+    ("R5-G2", "M", "Tests", "src/TabTabGo.Storage/ContentTypes/ContentDispositionFormatter.cs",
+     "char.IsSurrogate(c) || c < ' '", "c < ' '", "lone surrogates survive in names"),
     ("E-6", "M", "Data.EF.Tests", "src/TabTabGo.Storage.Data.EF/StorageModelsBuilder.cs",
      "        modelBuilder.Property(f => f.CreatedBy).IsRequired();", "", "audit-column pin removed (equivalent on v8: Core 8 columns are already required; it only bites on Core 10)"),
 ]

@@ -357,4 +357,24 @@ public class FileServiceFormatCharacterTests : IDisposable
 
         Assert.Equal("payroll.txt", file.OriginalFileName);
     }
+
+    [Theory]
+    [InlineData("\U000E0041", "payroll.txt")]
+    [InlineData("\U0001D173", "payroll.txt")]
+    [InlineData("\U0001F600", "pay\U0001F600roll.txt")]
+    public async Task Upload_NonBmpFormatCharacters_AndLoneSurrogates_AreStripped_EmojiKept(string inserted, string expected)
+    {
+        var file = await _h.Service.Upload(FileServiceHarness.Meta(), FileServiceHarness.Text($"pay{inserted}roll.txt"));
+
+        Assert.Equal(expected, file.OriginalFileName);
+    }
+
+    // Not a theory row: xunit cannot carry an unpaired surrogate through its data serialisation.
+    [Fact]
+    public async Task Upload_LoneSurrogate_IsStripped()
+    {
+        var file = await _h.Service.Upload(FileServiceHarness.Meta(), FileServiceHarness.Text("pay" + '\uD800' + "roll.txt"));
+
+        Assert.Equal("payroll.txt", file.OriginalFileName);
+    }
 }

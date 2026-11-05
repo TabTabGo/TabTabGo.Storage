@@ -192,6 +192,32 @@ public class ContentDispositionFormatterTests
         Assert.DoesNotContain(invisible.ToString(), value, StringComparison.Ordinal);
     }
 
+    // Format characters outside the BMP are surrogate pairs; they must go too, while a valid emoji pair stays.
+    [Theory]
+    [InlineData("\U000E0041")]
+    [InlineData("\U000E0001")]
+    [InlineData("\U000E007F")]
+    [InlineData("\U0001D173")]
+    [InlineData("\U0001D17A")]
+    [InlineData("\U000110BD")]
+    [InlineData("\U000110CD")]
+    public void Format_NonBmpFormatCharacter_IsRemoved(string invisible)
+    {
+        var value = ContentDispositionFormatter.Format($"pay{invisible}roll.pdf");
+
+        Assert.Contains("filename=\"payroll.pdf\"", value);
+        Assert.Equal("payroll.pdf", ContentDispositionFormatter.StripInvisible($"pay{invisible}roll.pdf"));
+    }
+
+    [Fact]
+    public void StripInvisible_LoneSurrogates_AreDropped_AndAValidEmojiPairIsKept()
+    {
+        Assert.Equal("ab", ContentDispositionFormatter.StripInvisible("a\uD800b"));
+        Assert.Equal("ab", ContentDispositionFormatter.StripInvisible("a\uDC00b"));
+        Assert.Equal("a\U0001F600b", ContentDispositionFormatter.StripInvisible("a\U0001F600b"));
+        Assert.Equal("ab", ContentDispositionFormatter.StripInvisible("a\uD800\uD800b"));
+    }
+
     [Theory]
     [InlineData('a')]
     [InlineData(' ')]

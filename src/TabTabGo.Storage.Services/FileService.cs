@@ -995,16 +995,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     {
         var unified = (name ?? string.Empty).Replace('\\', '/');
         unified = unified[(unified.LastIndexOf('/') + 1)..];
-        var builder = new StringBuilder(unified.Length);
-        foreach (var c in unified)
-        {
-            if (c >= ' ' && c != '\u007f' && !ContentDispositionFormatter.IsInvisibleControl(c))
-            {
-                builder.Append(c);
-            }
-        }
-
-        var clean = builder.ToString().Trim();
+        var clean = ContentDispositionFormatter.StripInvisible(unified).Trim();
         if (clean.Length == 0)
         {
             return "file";
