@@ -167,6 +167,10 @@ environment-scoped API key as the only fallback. CI (`ci.yml`) never publishes.
   `IUnitOfWork`; they are neither restored nor refused. Contexts are per request: do not let untrusted code edit tracked entities
   before calling the service.
 - Unicode "format" (Cf) characters are stripped from names, including ZWJ inside emoji sequences, so such names lose the joiner.
+  The joining characters that Persian and Indic scripts rely on (ZWNJ U+200C and ZWJ U+200D) are removed from file names too,
+  so a name written with them is stored and served without them; the visible letters are kept.
+- Do not share a `DbContext` that holds untrusted changes with the service: change detection cannot see edited collection
+  navigations, so such an edit is neither restored nor refused. Use a fresh context per request.
 - Azure containers must never be derived from user input: a container name is configuration, not a request field.
 - A 6.x host that ran under a Turkish or Azerbaijani culture may hold data in a container named `mage` (6.x lower-cased
   `Image` with the dotless i); v8 lower-cases invariantly, so that data is not found under `image` and has to be copied.

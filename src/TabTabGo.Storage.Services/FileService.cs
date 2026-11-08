@@ -607,9 +607,21 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         var file = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
         EnsureAllDeletable([file]);
         await PreDelete(file, cancellationToken).ConfigureAwait(false);
+        var previousUpdated = file.UpdatedDate;
         file.IsEnabled = false;
         file.UpdatedDate = _timeProvider.GetUtcNow();
-        await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The row is unchanged; keep the in-memory entity consistent with it.
+            file.IsEnabled = true;
+            file.UpdatedDate = previousUpdated;
+            throw;
+        }
+
         await PostDelete(file, cancellationToken).ConfigureAwait(false);
         return file;
     }
@@ -626,13 +638,28 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             .ConfigureAwait(false);
         EnsureAllDeletable(files);
         await RunPreDeleteAsync(files, bulk: true, cancellationToken).ConfigureAwait(false);
+        var previous = files.ToDictionary(f => f.FileId, f => f.UpdatedDate);
         foreach (var file in files)
         {
             file.IsEnabled = false;
             file.UpdatedDate = _timeProvider.GetUtcNow();
         }
 
-        await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            foreach (var file in files)
+            {
+                file.IsEnabled = true;
+                file.UpdatedDate = previous[file.FileId];
+            }
+
+            throw;
+        }
+
         await RunPostDeleteAsync(files, bulk: true, cancellationToken).ConfigureAwait(false);
         return files;
     }
@@ -822,7 +849,16 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             if (truth.TryGetValue(file.FileId, out var fromDb))
             {
                 RestoreOwned(file, fromDb);
-                EnsureNoPendingNavigationChange(file, fromDb);
+            }
+        }
+
+        // Change detection scans every tracked entity: run it once for the batch, then compare each file.
+        _ = _unitOfWork.GetChanges();
+        foreach (var file in tracked)
+        {
+            if (truth.TryGetValue(file.FileId, out var fromDb))
+            {
+                EnsureScalarsMatch(file, fromDb);
             }
         }
 
@@ -836,6 +872,11 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     private void EnsureNoPendingNavigationChange(TFile tracked, TFile truth)
     {
         _ = _unitOfWork.GetChanges();
+        EnsureScalarsMatch(tracked, truth);
+    }
+
+    private static void EnsureScalarsMatch(TFile tracked, TFile truth)
+    {
         foreach (var property in ScalarProperties)
         {
             if (!Equals(property.GetValue(tracked), property.GetValue(truth)))
