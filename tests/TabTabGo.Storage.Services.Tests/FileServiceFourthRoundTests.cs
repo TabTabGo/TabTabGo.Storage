@@ -226,6 +226,33 @@ public class FileServiceAuditTests : IDisposable
         Assert.Equal(before, _h.Reload(file.FileId).UpdatedDate);
     }
 
+    // The tracked entity is the instance the caller (and the context) keeps: a failed save must not leave a new UpdatedDate on it.
+    public static IEnumerable<object[]> Operations()
+    {
+        yield return ["update", (Func<HookedFileService, long, Task>)((s, id) => s.Update(id, new File { Title = "a", FileType = FileType.Text }))];
+        yield return ["updateJson", (Func<HookedFileService, long, Task>)((s, id) => s.Update(id, new JsonObject { ["Title"] = "b" }))];
+        yield return ["replace", (Func<HookedFileService, long, Task>)((s, id) => s.Replace(id, FileServiceHarness.Text("n.txt", "new")))];
+        yield return ["softDelete", (Func<HookedFileService, long, Task>)((s, id) => s.Delete(id))];
+        yield return ["softDeleteMany", (Func<HookedFileService, long, Task>)((s, id) => s.Delete(new[] { id }, CancellationToken.None))];
+    }
+
+    [Theory]
+    [MemberData(nameof(Operations))]
+    public async Task AFailedSave_LeavesUpdatedDateAndIsEnabledUnchanged_InMemory(string name, Func<HookedFileService, long, Task> run)
+    {
+        var file = await _h.UploadTextAsync();
+        var tracked = _h.Db.Context.Set<File>().Local.Single(f => f.FileId == file.FileId);
+        var before = tracked.UpdatedDate;
+        _h.Time.Advance(TimeSpan.FromHours(1));
+        _h.Uow.FailSave = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => run(_h.Service, file.FileId));
+
+        Assert.Equal(before, tracked.UpdatedDate);
+        Assert.True(tracked.IsEnabled);
+        Assert.True(name.Length > 0);
+    }
+
     [Fact]
     public async Task UpdatedBy_SetOnCurrentInPreUpdate_IsPersisted()
     {
@@ -376,5 +403,59 @@ public class FileServiceFormatCharacterTests : IDisposable
         var file = await _h.Service.Upload(FileServiceHarness.Meta(), FileServiceHarness.Text("pay" + '\uD800' + "roll.txt"));
 
         Assert.Equal("payroll.txt", file.OriginalFileName);
+    }
+}
+
+// Change detection scans every tracked entity, so a batch must pay for it once, not once per file.
+public class FileServiceChangeDetectionCostTests : IDisposable
+{
+    private readonly FileServiceHarness _h = new();
+
+    public void Dispose() => _h.Dispose();
+
+    private async Task<List<long>> FiveAsync()
+    {
+        var ids = new List<long>();
+        for (var i = 0; i < 5; i++)
+        {
+            ids.Add((await _h.UploadTextAsync($"f{i}.txt")).FileId);
+        }
+
+        return ids;
+    }
+
+    [Fact]
+    public async Task BulkSoftDelete_DetectsChangesOnce()
+    {
+        var ids = await FiveAsync();
+        var before = _h.Uow.GetChangesCalls;
+
+        await _h.Service.Delete(ids, CancellationToken.None);
+
+        Assert.Equal(1, _h.Uow.GetChangesCalls - before);
+    }
+
+    [Fact]
+    public async Task BulkPurgeAndQueryDelete_DetectChangesOncePerCall()
+    {
+        var ids = await FiveAsync();
+        var before = _h.Uow.GetChangesCalls;
+
+        await _h.Service.Purge(ids.Take(3));
+        Assert.Equal(1, _h.Uow.GetChangesCalls - before);
+
+        await _h.Service.Delete(f => ids.Contains(f.FileId));
+        Assert.Equal(2, _h.Uow.GetChangesCalls - before);
+    }
+
+    [Fact]
+    public async Task SingleFile_StillDetectsChangesOnce()
+    {
+        var file = await _h.UploadTextAsync();
+        var before = _h.Uow.GetChangesCalls;
+
+        await _h.Service.Update(file.FileId, new File { Title = "a", FileType = FileType.Text });
+
+        Assert.Equal(1, _h.Uow.GetChangesCalls - before);
     }
 }

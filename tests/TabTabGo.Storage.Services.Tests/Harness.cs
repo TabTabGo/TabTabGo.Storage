@@ -75,6 +75,15 @@ public sealed class FailingUnitOfWork(Microsoft.EntityFrameworkCore.DbContext co
 {
     public bool FailSave { get; set; }
 
+    /// <summary>Number of times the service forced EF change detection.</summary>
+    public int GetChangesCalls { get; private set; }
+
+    public override dynamic? GetChanges()
+    {
+        GetChangesCalls++;
+        return base.GetChanges();
+    }
+
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
         FailSave ? throw new InvalidOperationException("injected save failure") : base.SaveChangesAsync(cancellationToken);
 }
