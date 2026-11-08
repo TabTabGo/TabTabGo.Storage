@@ -73,6 +73,15 @@ Every provider passes the same contract suite:
   logs a warning when the storage root is under `wwwroot`.
 - **Denied extensions.** `StorageServiceOptions.DeniedExtensions` refuses HTML, SVG, XML/XHTML/XSL, JavaScript and
   executables by default; use `AllowedExtensions` for an allow-list. An extension is at most 10 characters.
+- **Reads have no `IsValidTo*` hook.** `GetFile` / `GetImage` by id go through `GetKeyPredicate`; to scope reads per tenant or
+  owner, override `GetKeyPredicate(long id)`. The default is `FileId == id && IsEnabled`: an override that drops the `IsEnabled`
+  filter makes soft-deleted files readable again, so it must re-add it (`entity.FileId == id && entity.IsEnabled && <your scope>`).
+- **The default deny-list is not exhaustive.** It does not list `.asp`, `.ashx`, `.asmx`, `.cshtml`, `.vbs`, `.wsf`, `.jar`,
+  `.msi`, `.scr`, `.lnk`, `.mht`, `.xaml`, `.htc` or `.phtml`. They were left out on purpose: adding them would refuse uploads
+  that 6.x and 8.0.0 accept, which is a breaking change, so the list can only grow in a major version. They are not
+  browser-executable through this library, because content types come from the extension and script-capable types are never
+  mapped to their native type (served as `application/octet-stream`). If your host executes or opens such files, set
+  `DeniedExtensions` to a longer list or, better, use the `AllowedExtensions` allow-list.
 - **Content type comes from the extension**, never from the client (`ContentTypeMap`). Script-capable types are
   never mapped to their native type, and signed URLs only override the response type to the type of the object's
   own extension (the caller's string is never echoed).
