@@ -7,9 +7,9 @@
 
   <PropertyGroup>
     <!-- Bounded range: a Storage line never floats onto another Core major. A local build overrides it with the
-         environment variable or -p:TabTabGoCoreVersion=10.0.0-local.<sha> (see scripts/local-core.py). Never committed
+         environment variable or -p:TabTabGoCoreVersion=11.0.0-local.<sha> (see scripts/local-core.py). Never committed
          with a -local value; release.yml checks this default. -->
-    <TabTabGoCoreVersion Condition="'$(TabTabGoCoreVersion)' == ''">[10.0.0, 11.0.0)</TabTabGoCoreVersion>
+    <TabTabGoCoreVersion Condition="'$(TabTabGoCoreVersion)' == ''">[11.0.0, 12.0.0)</TabTabGoCoreVersion>
   </PropertyGroup>
 
   <ItemGroup Label="TabTabGo Core">
@@ -18,13 +18,9 @@
     <PackageVersion Include="TabTabGo.Data.EF" Version="$(TabTabGoCoreVersion)" />
   </ItemGroup>
 
-  <ItemGroup Label="Microsoft.Extensions / EF Core (v10 line)">
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
+  <ItemGroup Label="Microsoft.Extensions / EF Core (v11 line; the base Microsoft.Extensions abstractions ship in the .NET 11 platform, NU1510)">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="11.0.0" />
   </ItemGroup>
 
   <ItemGroup Label="Providers">
@@ -42,15 +38,15 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageVersion Include="coverlet.MTP" Version="10.1.0" />
-    <PackageVersion Include="System.IO.Hashing" Version="10.0.0" />
+    <PackageVersion Include="System.IO.Hashing" Version="11.0.0" />
     <PackageVersion Include="Moq" Version="4.21.0" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="11.0.0" />
     <!-- Microsoft.EntityFrameworkCore.SqlServer 10.0.14 brings System.Security.Cryptography.Pkcs 9.0.11 (moderate + high advisories); pinned up here (test project only). -->
-    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.14" />
-    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.11.0" />
-    <PackageVersion Include="Microsoft.Extensions.Diagnostics.Testing" Version="10.11.0" />
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.Testing" Version="11.0.0" />
     <PackageVersion Include="Testcontainers.Azurite" Version="4.16.0" />
     <PackageVersion Include="Testcontainers.LocalStack" Version="4.16.0" />
   </ItemGroup>

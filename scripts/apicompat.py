@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Assembly-mode API compatibility check of the v10 assemblies against the 8.0.0 libraries (the v8 line).
+"""Assembly-mode API compatibility check of the v11 assemblies against the 10.0.0 libraries (the v10 line).
 
-v10 may only ADD API relative to v8 (additive-only rule); every break must be a deliberate row in EXACT below. Package
+v11 may only ADD API relative to v10 (additive-only rule); every break must be a deliberate row in EXACT below. Package
 validation compares the package, not the assembly, so this script takes the baseline package's lib assembly and runs
 Microsoft.DotNet.ApiCompat.Tool (pinned in .config/dotnet-tools.json) against the freshly built net10.0 assembly.
 
-    python3 scripts/apicompat.py                            # CI: download 8.0.0 from nuget.org (SHA-256 pinned below)
-    python3 scripts/apicompat.py --baseline-dir DIR         # local: use DIR/<package>.8.0.0.nupkg built from the v8 worktree
+    python3 scripts/apicompat.py                            # CI: download 10.0.0 from nuget.org (SHA-256 pinned below)
+    python3 scripts/apicompat.py --baseline-dir DIR         # local: use DIR/<package>.10.0.0.nupkg built from the v10 worktree
     python3 scripts/apicompat.py --update [--baseline-dir]  # regenerate compat/*.suppressions.xml; every entry must match an
                                                             # EXACT row or the script fails and lists what is unmapped
 
 Build first: dotnet build TabTabGo.Storage.sln -c Release. Downloaded packages are cached under artifacts/apicompat-baseline/
-(git-ignored); a --baseline-dir package is extracted fresh on every run and never cached. The 8.0.0 SHA-256 values are recorded
-after 8.0.0 is published (see BASELINE_SHA256): without them the download mode refuses to run, so a missing pin can never pass
+(git-ignored); a --baseline-dir package is extracted fresh on every run and never cached. The 10.0.0 SHA-256 values are recorded
+after 10.0.0 is published (see BASELINE_SHA256): without them the download mode refuses to run, so a missing pin can never pass
 silently. Known gap: ApiCompat does not report a public field turned into a property as a distinct break the way source
 compilers see it; behaviour changes are not API changes at all; both are covered by the README upgrade table and by tests.
 """
@@ -31,25 +31,25 @@ import zipfile
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CACHE = REPO / "artifacts" / "apicompat-baseline"
 COMPAT = REPO / "compat"
-BASELINE = "8.0.0"
+BASELINE = "10.0.0"
 
 # package id, folder under src, baseline lib TFM
 PACKAGES = [
-    ("TabTabGo.Storage", "TabTabGo.Storage", "net8.0"),
-    ("TabTabGo.Storage.Services", "TabTabGo.Storage.Services", "net8.0"),
-    ("TabTabGo.Storage.Data.EF", "TabTabGo.Storage.Data.EF", "net8.0"),
-    ("TabTabGo.Storage.Aws", "TabTabGo.Storage.Aws", "net8.0"),
-    ("TabTabGo.Storage.Azure", "TabTabGo.Storage.AzureStorage", "net8.0"),
-    ("TabTabGo.Storage.FileStorage", "TabTabGo.Storage.FileStorage", "net8.0"),
+    ("TabTabGo.Storage", "TabTabGo.Storage", "net10.0"),
+    ("TabTabGo.Storage.Services", "TabTabGo.Storage.Services", "net10.0"),
+    ("TabTabGo.Storage.Data.EF", "TabTabGo.Storage.Data.EF", "net10.0"),
+    ("TabTabGo.Storage.Aws", "TabTabGo.Storage.Aws", "net10.0"),
+    ("TabTabGo.Storage.Azure", "TabTabGo.Storage.AzureStorage", "net10.0"),
+    ("TabTabGo.Storage.FileStorage", "TabTabGo.Storage.FileStorage", "net10.0"),
 ]
-RIGHT_TFM = "net10.0"
+RIGHT_TFM = "net11.0"
 
 # Exact suppression targets -> (spec row, reason). A break that is not listed here is NOT auto-labelled: --update fails and
 # lists it, so a new break needs a deliberate row (substring rules would have labelled an unrelated change by accident).
-# v8 -> v10 has none yet: the v10 line is additive. Add a row here (with the spec id) before accepting any break.
+# v10 -> v11 has none yet: the v11 line is additive. Add a row here (with the spec id) before accepting any break.
 EXACT = {}
 
-# SHA-256 of the published 8.0.0 packages, so a tampered download or cache cannot change the baseline. Filled in when 8.0.0 is
+# SHA-256 of the published 10.0.0 packages, so a tampered download or cache cannot change the baseline. Filled in when 10.0.0 is
 # published (run the release workflow's pack output through `sha256sum`); empty means "download mode refuses to run".
 BASELINE_SHA256 = {}
 
@@ -96,7 +96,7 @@ def fetch_local(package: str, baseline_dir: pathlib.Path) -> pathlib.Path:
     """Extract DIR/<package>.<BASELINE>.nupkg into a fresh folder (a locally built baseline is never cached or pinned)."""
     nupkg = baseline_dir / f"{package}.{BASELINE}.nupkg"
     if not nupkg.exists():
-        sys.exit(f"{nupkg} not found: pack the v8 worktree first (dotnet pack TabTabGo.Storage.sln -c Release -o {baseline_dir})")
+        sys.exit(f"{nupkg} not found: pack the v10 worktree first (dotnet pack TabTabGo.Storage.sln -c Release -o {baseline_dir})")
     dest = CACHE / "local" / package
     if dest.exists():
         shutil.rmtree(dest)
@@ -110,8 +110,8 @@ def fetch(package: str, baseline_dir: pathlib.Path | None = None) -> pathlib.Pat
     if baseline_dir is not None:
         return fetch_local(package, baseline_dir)
     if package not in BASELINE_SHA256:
-        sys.exit(f"No pinned SHA-256 for {package} {BASELINE}: record the published package hashes in BASELINE_SHA256 after 8.0.0 "
-                 "is published, or pass --baseline-dir with packages built from the v8 worktree")
+        sys.exit(f"No pinned SHA-256 for {package} {BASELINE}: record the published package hashes in BASELINE_SHA256 after 10.0.0 "
+                 "is published, or pass --baseline-dir with packages built from the v10 worktree")
     dest = CACHE / package
     marker = dest / ".done"
     nupkg = CACHE / f"{package}.{BASELINE}.nupkg"
@@ -165,7 +165,7 @@ def annotate(raw: str, package: str):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--update", action="store_true", help="regenerate compat/*.suppressions.xml")
-    ap.add_argument("--baseline-dir", type=pathlib.Path, help="folder with locally packed v8 packages (<id>.8.0.0.nupkg)")
+    ap.add_argument("--baseline-dir", type=pathlib.Path, help="folder with locally packed v10 packages (<id>.10.0.0.nupkg)")
     args = ap.parse_args()
     COMPAT.mkdir(exist_ok=True)
     failed = False

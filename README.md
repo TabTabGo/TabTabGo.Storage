@@ -2,9 +2,9 @@
 
 File storage for .NET: one port (`IStorageProvider`), three providers (AWS S3, Azure Blob, local disk), a `File`
 entity and `FileService<TFile>` (upload, replace, update, read, delete, image thumbnails), and an EF Core model
-builder. This is the **v10 line** (`net10.0`, package version `10.x`, depends on `TabTabGo.Core` 10.0.0 or later 10.x).
-The v8 line (`net8.0`, Core 8.0.1+) carries the same fixes for applications that have not moved to .NET 10; the .NET 8 runtime
-is out of support from 2026-11-10.
+builder. This is the **v11 line** (`net11.0`, package version `11.x`, currently the pre-release `11.0.0-rc.N`, depends on `TabTabGo.Core`
+11.0.0 or later 11.x). The v10 line (`net10.0`, Core 10) and the v8 line (`net8.0`, Core 8.0.1+) carry the same fixes for applications
+that are not on .NET 11; the .NET 8 runtime is out of support from 2026-11-10.
 
 ## Packages
 
@@ -96,6 +96,16 @@ Every provider passes the same contract suite:
   and 7 days.
 - Thumbnail generation rejects images over `ImageServiceOptions.MaxPixels` (decompression-bomb guard).
 
+## Upgrading from 10.x to 11.0.0
+
+v11 only adds API relative to 10.0.0 (`python3 scripts/apicompat.py` proves it). What changes:
+
+| Change | Migration |
+|---|---|
+| `net11.0` only; `TabTabGo.Core` `[11.0.0, 12.0.0)`; EF Core / Microsoft.Extensions 11.0.0 | consume the Core 11 line |
+| `Microsoft.Extensions.Options`, `Logging.Abstractions`, `DependencyInjection.Abstractions` and `Hosting.Abstractions` are part of the .NET 11 platform and are no longer package references (NU1510) | none |
+| `Microsoft.Extensions.TimeProvider.Testing` / `Diagnostics.Testing` 11.0.0 (test projects) | none |
+
 ## Upgrading from 8.x to 10.0.0
 
 v10 only adds API relative to 8.0.0 (`python3 scripts/apicompat.py` proves it). What changes:
@@ -159,23 +169,23 @@ dotnet test --solution TabTabGo.Storage.sln -c Release --no-build --coverlet --c
 python3 scripts/coverage-gate.py coverage                   # 85 % lines / 75 % branches
 ```
 
-`global.json` pins the SDK (10.0.401). While `TabTabGo.Core` 10.0.0 is not on nuget.org, build against a local Core:
+`global.json` pins the SDK (11.0.100). While `TabTabGo.Core` 11.0.0 is not on nuget.org, build against a local Core:
 
 ```bash
-python3 scripts/local-core.py                       # packs Core v10 as 10.0.0-local.<sha> and writes nuget.local.config (git-ignored)
-export TabTabGoCoreVersion=10.0.0-local.<sha>       # printed by the script; overrides the [10.0.0, 11.0.0) range
+python3 scripts/local-core.py                       # packs Core v11 as 11.0.0-local.<sha> and writes nuget.local.config (git-ignored)
+export TabTabGoCoreVersion=11.0.0-local.<sha>       # printed by the script; overrides the [11.0.0, 12.0.0) range
 dotnet restore TabTabGo.Storage.sln --configfile nuget.local.config
 dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
 ```
 
 The local packages live in `tabtabgo/.local-nuget` (never committed); the Core worktree is not touched.
 **Unset the variable when you are done** (`unset TabTabGoCoreVersion`): a leftover `export` keeps every build on the
-local Core even after 10.0.0 is published on nuget.org. Never publish
+local Core even after 11.0.0 is published on nuget.org. Never publish
 with the variable set: `release.yml` refuses it. Emulator tests (LocalStack 4.0, Azurite) need Docker and skip
 themselves without it; set `TTG_SKIP_EMULATORS=true` to skip them explicitly.
 
-API compatibility against the 8.0.0 libraries (additive-only) is checked by `python3 scripts/apicompat.py` (CI: the
-published packages, SHA-256 pinned once 8.0.0 is published; locally `--baseline-dir` with packages packed from the v8 worktree;
+API compatibility against the 10.0.0 libraries (additive-only) is checked by `python3 scripts/apicompat.py` (CI: the
+published packages, SHA-256 pinned once 10.0.0 is published; locally `--baseline-dir` with packages packed from the v10 worktree;
 every suppression in `compat/` would have to cite its spec row, and there are none); `python3 scripts/mutation-check.py` re-introduces the registered bugs
 and proves a test kills each one; `Golden/capture/capture.py` re-captures the EF model golden files from the 6.0.8.4 sources.
 

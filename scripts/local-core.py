@@ -77,7 +77,13 @@ def main() -> int:
     if args.env:
         print(f"export TabTabGoCoreVersion={latest_local_version(line)}")
         return 0
-    subprocess.run([sys.executable, str(PACK), "--line", line], check=True)
+    if line == "v11":
+        # pack-core-local.py --line v11 looks for a worktree named TabTabGo.Core-v11; the Core 11 worktree is TabTabGo.Core-rel11, so
+        # use the script's explicit mode (a git archive of the clean worktree, version <core>-local.<sha>, into the same feed).
+        subprocess.run([sys.executable, str(PACK), "--core", str(TABTABGO / "TabTabGo.Core-rel11"), "--feed", str(FEED), "--explicit"],
+                       check=True)
+    else:
+        subprocess.run([sys.executable, str(PACK), "--line", line], check=True)
     version = latest_local_version(line)
     write_config(version)
     print(f"\nWrote {REPO / 'nuget.local.config'}\nNext:\n  export TabTabGoCoreVersion={version}\n"
