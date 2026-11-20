@@ -109,7 +109,7 @@ jobs:
           head="$(git rev-parse HEAD)"
           if [ "$sha" != "$head" ]; then echo "::error::checked-out commit is not the tag's commit"; exit 1; fi
           if [ "$EVENT_NAME" = "push" ] && [ "$sha" != "$EVENT_SHA" ]; then echo "::error::tag commit differs from the pushed commit"; exit 1; fi
-          printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::not a commit hash"; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag, framework, branch, version and Core dependency
@@ -119,37 +119,28 @@ jobs:
           SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           set -euo pipefail
-          version="${TAG#v}"
-          core="${version%%-*}"
-          IFS=. read -r major minor patch <<<"$core"
-
-          tfm="$(grep -oE '<TargetFramework>[^<]+' Directory.Build.props | head -1 | sed 's/<TargetFramework>//')"
-          [ "$tfm" = "net${major}.0" ] || { echo "::error::tag major $major does not match TargetFramework $tfm"; exit 1; }
-
+          # Tag format, target framework, releases/vM.m.x branch and the declared <Version> (compared with the FULL tag version) are
+          # checked by a script, not by pipelines: `x | grep -q` under pipefail fails at random with SIGPIPE.
           branches="$(git branch -r --contains "$SHA" | sed 's/^[* ]*//')"
-          printf '%s\n' "$branches" | grep -Eq "^origin/releases/v${major}\.${minor}\.x/" \
-            || { echo "::error::tagged commit is not on a releases/v${major}.${minor}.x/* branch"; exit 1; }
-
-          declared="$(grep -oE '<Version>[^<]+' Directory.Build.props | head -1 | sed 's/<Version>//')"
-          [ "$declared" = "$core" ] || { echo "::error::tag $core differs from Directory.Build.props Version $declared"; exit 1; }
+          python3 scripts/release_verify.py tag "$TAG" --branches "$branches" >> "$GITHUB_OUTPUT"
+          version="${TAG#v}"
 
           if [ -n "${TabTabGoCoreVersion:-}" ]; then echo "::error::TabTabGoCoreVersion must not be set in a release run"; exit 1; fi
-          core_range="$(grep -oE '<TabTabGoCoreVersion[^>]*>[^<]+' Directory.Packages.props | head -1 | sed 's/.*>//')"
+          core_range="$(grep -m1 -oE '<TabTabGoCoreVersion[^>]*>[^<]+' Directory.Packages.props | sed 's/.*>//')"
           [ -n "$core_range" ] || { echo "::error::no default Core version range found in Directory.Packages.props"; exit 1; }
-          if printf '%s' "$core_range" | grep -qE -- 'local'; then
+          if [[ "$core_range" == *local* ]]; then
             echo "::error::a -local Core version is the default; local feeds must not be released"; exit 1
           fi
           # Every PackageVersion line for TabTabGo.* must use the property (no hard-coded floating pin).
-          if grep -E 'PackageVersion Include="TabTabGo\.' Directory.Packages.props | grep -vq 'Version="\$(TabTabGoCoreVersion)"'; then
+          hardcoded="$(grep -E 'PackageVersion Include="TabTabGo\.' Directory.Packages.props | grep -v 'Version="\$(TabTabGoCoreVersion)"' || true)"
+          if [ -n "$hardcoded" ]; then
             echo "::error::TabTabGo.* packages must take their version from TabTabGoCoreVersion"; exit 1
           fi
           prerelease=false
           if [[ "$version" == *-* ]]; then prerelease=true; fi
-          if [ "$prerelease" = "false" ] && printf '%s' "$core_range" | grep -qE '[0-9]+\.[0-9]+\.[0-9]+-'; then
+          if [ "$prerelease" = "false" ] && [[ "$core_range" =~ [0-9]+\.[0-9]+\.[0-9]+- ]]; then
             echo "::error::a stable tag must not depend on a pre-release TabTabGo.Core"; exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
   build-test-pack:
     name: build-test-pack
@@ -190,6 +181,8 @@ jobs:
           python3 scripts/apicompat.py
 
       - name: Test (emulator tests included; Docker is available on this runner)
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: 'true'   # ephemeral runner; a failed Ryuk start would hang the emulator tests
         run: dotnet test --solution TabTabGo.Storage.sln -c Release --no-build --coverlet --coverlet-output-format cobertura --results-directory coverage
 
       - name: Coverage gate
@@ -215,18 +208,7 @@ jobs:
         run: dotnet pack TabTabGo.Storage.sln -c Release --no-build -p:Version="$VERSION" -p:ContinuousIntegrationBuild=true -o out
 
       - name: Verify the package set
-        run: |
-          set -euo pipefail
-          expected_count="$(wc -w <<<"$EXPECTED_PACKAGES")"
-          [ "$(ls out/*.nupkg | wc -l)" -eq "$expected_count" ] || { echo "::error::unexpected number of .nupkg"; exit 1; }
-          [ "$(ls out/*.snupkg | wc -l)" -eq "$expected_count" ] || { echo "::error::unexpected number of .snupkg"; exit 1; }
-          for id in $EXPECTED_PACKAGES; do
-            file="out/${id}.${VERSION}.nupkg"
-            [ -f "$file" ] || { echo "::error::missing $file"; exit 1; }
-            unzip -p "$file" "${id}.nuspec" | grep -q "<version>${VERSION}</version>" || { echo "::error::$file has the wrong version"; exit 1; }
-            unzip -l "$file" | grep -q "lib/net11.0/" || { echo "::error::$file has no net11.0 lib"; exit 1; }
-            unzip -l "$file" | grep -q "README.md" || { echo "::error::$file has no README"; exit 1; }
-          done
+        run: python3 scripts/release_verify.py packages --dir out --expected "$EXPECTED_PACKAGES" --version "$VERSION"
 
       - name: Verify the RESOLVED Core dependency of every package
         env:
@@ -235,7 +217,7 @@ jobs:
           set -euo pipefail
           # The default range as written in Directory.Packages.props; what was actually packed must be exactly that,
           # so a value injected through Directory.Build.props, a .rsp file or the environment cannot slip through.
-          core_range="$(grep -oE '<TabTabGoCoreVersion[^>]*>[^<]+' Directory.Packages.props | head -1 | sed 's/.*>//')"
+          core_range="$(grep -m1 -oE '<TabTabGoCoreVersion[^>]*>[^<]+' Directory.Packages.props | sed 's/.*>//')"
           if [ "$PRERELEASE" = "false" ] && ! [[ "$core_range" =~ ^\[[0-9]+\.[0-9]+\.[0-9]+,\ [0-9]+\.[0-9]+\.[0-9]+\)$ ]]; then
             echo "::error::a stable tag needs a stable bounded Core range, found '$core_range'"; exit 1
           fi
