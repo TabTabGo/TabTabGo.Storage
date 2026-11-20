@@ -25,7 +25,7 @@ public sealed class AzuriteFixture : IAsyncLifetime
         }
 
         _container = new AzuriteBuilder().WithCommand("--skipApiVersionCheck").Build();
-        await EmulatorStart.RunAsync("Azurite", _container.StartAsync);
+        await EmulatorStart.RunAsync("Azurite", _container.StartAsync, dispose: _container.DisposeAsync);
         ConnectionString = _container.GetConnectionString();
     }
 

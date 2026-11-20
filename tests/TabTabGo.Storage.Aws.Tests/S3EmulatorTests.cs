@@ -27,7 +27,7 @@ public sealed class LocalStackFixture : IAsyncLifetime
         }
 
         _container = new LocalStackBuilder("localstack/localstack:4.0.3").Build();
-        await EmulatorStart.RunAsync("LocalStack", _container.StartAsync);
+        await EmulatorStart.RunAsync("LocalStack", _container.StartAsync, dispose: _container.DisposeAsync);
         Configuration = new S3Configuration
         {
             BucketName = Bucket,

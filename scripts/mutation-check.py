@@ -216,6 +216,9 @@ M = [
     ("T5", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
      "            afterCommit.Clear();\n", "",
      "after-commit steps of a failed attempt are kept on retry (PostUpdate and the old-object removal run twice)"),
+    ("R10-1", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "if (hostTransaction && scope is not null && !IsInScopeInMemory(current, scope))", "if (false)",
+     "a scoped update that leaves the scope is saved when the host owns the transaction"),
     ("E-6", "M", "Data.EF.Tests", "src/TabTabGo.Storage.Data.EF/StorageModelsBuilder.cs",
      "        modelBuilder.Property(f => f.CreatedBy).IsRequired();", "", "audit-column pin removed (equivalent on v8: Core 8 columns are already required; it only bites on Core 10)"),
 ]

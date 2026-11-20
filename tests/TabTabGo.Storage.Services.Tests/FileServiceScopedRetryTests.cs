@@ -167,6 +167,27 @@ public class FileServiceScopedHostTransactionTests : IDisposable
     }
 
     [Fact]
+    public async Task ScopedUpdate_ThatLeavesTheScope_InsideAHostTransaction_Is404_AndNothingIsSaved()
+    {
+        // The host owns the transaction and may catch the exception and commit: the move out of scope must never reach the database.
+        var (service, uow, _) = Build();
+        var file = await service.Upload(FileServiceHarness.Meta(), FileServiceHarness.Text());
+        service.Events.Clear();
+        uow.InHostTransaction = true;
+        var client = new File { Title = "changed", ReferenceId = 99, ReferenceType = "Ticket", FileType = TabTabGo.Storage.Enums.FileType.Text };
+
+        var ex = await Assert.ThrowsAsync<TabTabGo.Core.Exceptions.ApiException>(() =>
+            service.UpdateChanges(file.FileId, client, f => f.ReferenceId == 7, CancellationToken.None));
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, ex.HttpStatusCode);
+        using var other = _db.NewContext();
+        var stored = other.Set<File>().Single(f => f.FileId == file.FileId);
+        Assert.Equal(7, stored.ReferenceId);
+        Assert.NotEqual("changed", stored.Title);
+        Assert.DoesNotContain("PostUpdate", service.Events);
+    }
+
+    [Fact]
     public async Task ScopedUpdateWithoutRelocation_InsideAHostTransaction_Works()
     {
         var (service, uow, _) = Build();

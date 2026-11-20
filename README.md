@@ -84,6 +84,18 @@ Every provider passes the same contract suite:
   browser-executable through this library, because content types come from the extension and script-capable types are never
   mapped to their native type (served as `application/octet-stream`). If your host executes or opens such files, set
   `DeniedExtensions` to a longer list or, better, use the `AllowedExtensions` allow-list.
+- **Retries, concurrency and host transactions (scoped update and delete).**
+  - A retrying execution strategy runs the scoped `UpdateChanges` operation again after a transient failure, so `IsValidToUpdate`,
+    `EnsureValidToUpdate` and `PreUpdate` run again too: keep them repeatable. A `PreUpdate` with an external side effect (an email, a
+    call to another service) can fire twice. `PostUpdate` and the removal of the old objects run once, after the commit.
+  - An *ambiguous* commit (a transient failure that in fact committed) is retried from the database: the retry sees the committed
+    row, so the objects of the old file type may stay in storage as orphans. They are harmless but not reclaimed.
+  - The scope of a scoped delete or update is part of the load query, but there is a window between the load and the save: if the
+    columns the scope tests change concurrently, the check can be stale (the same as in Core). The scoped update re-checks the scope
+    in the database after the save and rolls back; the scoped delete does not.
+  - Inside a transaction **you** opened, the scoped update checks the merged entity against the scope **before** saving (a scope that
+    cannot be evaluated in memory falls back to the check after the save) and refuses a file type change with 409. It cannot undo a
+    save you commit anyway, and `PostUpdate` still runs before your commit.
 - **Content type comes from the extension**, never from the client (`ContentTypeMap`). Script-capable types are
   never mapped to their native type, and signed URLs only override the response type to the type of the object's
   own extension (the caller's string is never echoed).

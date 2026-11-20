@@ -190,8 +190,9 @@ jobs:
           set -euo pipefail
           dotnet list TabTabGo.Storage.sln package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
           dotnet list TabTabGo.Storage.sln package --deprecated 2>&1 | tee deprecated.txt
-          if grep -qE "has the following vulnerable packages" vulnerable.txt; then echo "::error::vulnerable packages"; exit 1; fi
-          if grep -qE "has the following deprecated packages" deprecated.txt; then echo "::error::deprecated packages"; exit 1; fi
+          # `dotnet list` exits 0 even when it cannot read the audit data; the script fails closed on that too.
+          python3 scripts/release_verify.py audit --kind vulnerable --file vulnerable.txt
+          python3 scripts/release_verify.py audit --kind deprecated --file deprecated.txt
 
       - name: Secret scan (checksum-verified gitleaks)
         run: |
@@ -265,6 +266,18 @@ jobs:
         with:
           name: packages
           path: out
+
+      - name: Checkout the tag (scripts only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.guard.outputs.tag }}
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - name: Refuse a version that is already on nuget.org (--skip-duplicate would make a re-run look green)
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: python3 scripts/release_verify.py not-published --dir out --version "$VERSION"
 
       - name: Select the authentication mode
         id: mode

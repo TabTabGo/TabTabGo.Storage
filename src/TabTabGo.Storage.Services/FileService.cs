@@ -348,7 +348,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The updated entity.</returns>
     public override Task<TFile> Update(long id, TFile entity, CancellationToken cancellationToken = default) =>
-        UpdateEntityAsync(id, CopyIncoming(entity), scope: null, afterCommit: null, refuseRelocation: false, cancellationToken);
+        UpdateEntityAsync(id, CopyIncoming(entity), scope: null, afterCommit: null, hostTransaction: false, cancellationToken);
 
     // The caller may pass the tracked instance itself (load, edit, update): take its values before it is restored. The copy is made
     // once per call, before any retry, so a retried attempt applies the client's values and not the restored database values.
@@ -366,7 +366,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     // not run before the commit (removing the old objects, PostUpdate) are handed to afterCommit instead of running here.
     // `entity` is the private copy made by CopyIncoming; it is only read here, so every retry attempt can reuse it.
     private async Task<TFile> UpdateEntityAsync(long id, TFile entity, Expression<Func<TFile, bool>>? scope,
-        List<Func<CancellationToken, Task>>? afterCommit, bool refuseRelocation, CancellationToken cancellationToken)
+        List<Func<CancellationToken, Task>>? afterCommit, bool hostTransaction, CancellationToken cancellationToken)
     {
         var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken, scope).ConfigureAwait(false);
         EnsureDefined(entity.FileType);
@@ -378,7 +378,14 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         {
             FileMetadata<TFile>.CopyFrom(current, entity, _options.AllowMetadataExtraProperties);
             var newType = entity.FileType == FileType.Unknown ? current.FileType : entity.FileType;
-            if (refuseRelocation && newType != current.FileType)
+            if (hostTransaction && scope is not null && !IsInScopeInMemory(current, scope))
+            {
+                // The host owns the transaction and may catch this and commit, so the move out of the scope must not be saved at
+                // all (outside a host transaction the post-save check below rolls our own transaction back).
+                throw NotFound(current.FileId);
+            }
+
+            if (hostTransaction && newType != current.FileType)
             {
                 // Moving the objects removes the old ones after the unit of work returns; inside the host's transaction that is
                 // before the host commits, so a later rollback would lose them.
@@ -971,6 +978,20 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         {
             throw new ApiException($"File type {(int)type} is not valid.", null, LogLevel.Warning, null,
                 HttpStatusCode.BadRequest, "INVALID_FILE_TYPE");
+        }
+    }
+
+    // The merged entity checked against the scope before anything is saved. A scope the in-memory evaluation cannot handle (database
+    // functions, navigations that are not loaded) is not an answer: the database check after the save remains the authority.
+    private static bool IsInScopeInMemory(TFile merged, Expression<Func<TFile, bool>> scope)
+    {
+        try
+        {
+            return scope.Compile()(merged);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NullReferenceException or NotSupportedException)
+        {
+            return true;
         }
     }
 

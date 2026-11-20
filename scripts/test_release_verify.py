@@ -68,6 +68,86 @@ class TagTests(unittest.TestCase):
                 rv.parse_tag(tag)
 
 
+class TagStrictnessTests(unittest.TestCase):
+    def test_non_ascii_digits_and_leading_zeros_are_refused(self):
+        # \d matches Arabic-Indic digits and the old pattern accepted leading zeros: v010.0.0 and v1.2.3-rc.01 are not canonical.
+        for tag in ("v\u0661\u0660.0.0", "v010.0.0", "v1.02.3", "v1.2.03", "v1.2.3-rc.01", "v00.0.0", "v1.2.3-rc.00"):
+            with self.subTest(tag=ascii(tag)), self.assertRaises(rv.ReleaseError):
+                rv.parse_tag(tag)
+
+    def test_zero_components_are_fine(self):
+        for tag in ("v0.0.0", "v10.0.10", "v1.2.3-rc.0", "v1.2.3-rc.10"):
+            with self.subTest(tag=tag):
+                self.assertEqual(tag[1:], rv.parse_tag(tag).version)
+
+
+class AuditGateTests(unittest.TestCase):
+    CLEAN_V = "The given project `A` has no vulnerable packages given the current sources.\nThe given project `B` has no vulnerable packages given the current sources.\n"
+    CLEAN_D = "The given project `A` has no deprecated packages given the current sources.\n"
+
+    def test_clean_output_passes(self):
+        rv.check_audit(self.CLEAN_V, "vulnerable")
+        rv.check_audit(self.CLEAN_D, "deprecated")
+
+    def test_findings_fail(self):
+        with self.assertRaises(rv.ReleaseError):
+            rv.check_audit(self.CLEAN_V + "Project `C` has the following vulnerable packages\n   > Foo 1.0.0 High\n", "vulnerable")
+        with self.assertRaises(rv.ReleaseError):
+            rv.check_audit(self.CLEAN_D + "Project `C` has the following deprecated packages\n   > Foo 1.0.0 Legacy\n", "deprecated")
+
+    def test_an_unreachable_vulnerability_source_fails_closed(self):
+        # dotnet list exits 0 and prints a warning when it cannot read the audit data: that must not pass.
+        for text in (
+            self.CLEAN_V + "warning NU1900: Error occurred while getting package vulnerability data: Unable to load the service index for source https://api.nuget.org/v3/index.json.\n",
+            "warning NU1900: Error occurred while getting package vulnerability data\n",
+            self.CLEAN_V + "error: Unable to load the service index for source https://api.nuget.org/v3/index.json.\n",
+            self.CLEAN_V + "Failed to retrieve information about 'X' from remote source\n",
+            "",
+            "Build succeeded.\n",
+        ):
+            with self.subTest(text=text[:50]), self.assertRaises(rv.ReleaseError):
+                rv.check_audit(text, "vulnerable")
+
+    def test_the_cli_exit_code_follows_the_verdict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            good = pathlib.Path(tmp) / "good.txt"
+            bad = pathlib.Path(tmp) / "bad.txt"
+            good.write_text(self.CLEAN_V)
+            bad.write_text("warning NU1900: Error occurred while getting package vulnerability data\n")
+            run = lambda f: subprocess.run([sys.executable, str(SCRIPTS / "release_verify.py"), "audit", "--kind", "vulnerable", "--file", str(f)],
+                                           capture_output=True, text=True).returncode
+            self.assertEqual(0, run(good))
+            self.assertEqual(1, run(bad))
+
+
+class NotPublishedTests(unittest.TestCase):
+    def test_a_version_that_exists_on_nuget_org_blocks_the_release(self):
+        with self.assertRaises(rv.ReleaseError) as raised:
+            rv.check_not_published(["Pkg.A", "Pkg.B"], "1.2.3", lambda url: 200 if "pkg.b" in url else 404)
+        self.assertIn("Pkg.B", str(raised.exception))
+
+    def test_an_unpublished_version_passes(self):
+        urls = []
+        rv.check_not_published(["Pkg.A"], "1.2.3-rc.1", lambda url: urls.append(url) or 404)
+        self.assertEqual(["https://api.nuget.org/v3-flatcontainer/pkg.a/1.2.3-rc.1/pkg.a.nuspec"], urls)
+
+    def test_an_unclear_answer_fails_closed(self):
+        for answer in (500, 403, 302):
+            with self.subTest(answer=answer), self.assertRaises(rv.ReleaseError):
+                rv.check_not_published(["Pkg.A"], "1.2.3", lambda url, a=answer: a)
+
+        def boom(url):
+            raise OSError("network down")
+
+        with self.assertRaises(rv.ReleaseError):
+            rv.check_not_published(["Pkg.A"], "1.2.3", boom)
+
+    def test_the_publish_job_runs_the_check_before_the_push(self):
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text()
+        check = text.index("release_verify.py not-published")
+        self.assertLess(check, text.index("dotnet nuget push"))
+
+
 class PackageSetTests(unittest.TestCase):
     IDS = ["Pkg.A", "Pkg.B"]
 
@@ -144,6 +224,12 @@ class WorkflowHygieneTests(unittest.TestCase):
                 if re.search(r"\|\s*grep\s+(-[a-zA-Z]*q|-[a-zA-Z]*\s+-[a-zA-Z]*q)", code) or re.search(r"\|\s*grep\s+-[a-zA-Z]*q", code):
                     offenders.append(f"{path.name}:{number}: {line.strip()}")
         self.assertEqual([], offenders)
+
+    def test_the_audit_steps_use_the_fail_closed_gate(self):
+        for name in ("release.yml", "ci.yml"):
+            text = (REPO / ".github" / "workflows" / name).read_text()
+            self.assertIn("release_verify.py audit --kind vulnerable", text, name)
+            self.assertIn("release_verify.py audit --kind deprecated", text, name)
 
     def test_release_workflow_uses_the_script_for_tag_and_package_checks(self):
         text = (REPO / ".github" / "workflows" / "release.yml").read_text()
