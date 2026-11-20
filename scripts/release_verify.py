@@ -19,7 +19,9 @@ import re
 import sys
 import zipfile
 
-TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(-(?:rc|preview|alpha|beta)\.\d+)?$")
+# ASCII digits only and no leading zeros: \d also matches other scripts' digits, and v010.0.0 / rc.01 are not canonical.
+NUM = r"(0|[1-9][0-9]*)"
+TAG_RE = re.compile(rf"^v{NUM}\.{NUM}\.{NUM}(-(?:rc|preview|alpha|beta)\.{NUM})?$", re.ASCII)
 
 
 class ReleaseError(Exception):
@@ -40,7 +42,7 @@ def parse_tag(tag: str) -> Tag:
     match = TAG_RE.fullmatch(tag) if "\n" not in tag else None
     if match is None:
         raise ReleaseError("tag does not match vMAJOR.MINOR.PATCH[-rc|preview|alpha|beta.N]")
-    major, minor, patch, suffix = match.groups()
+    major, minor, patch, suffix, _ = match.groups()
     return Tag(version=tag[1:], core=f"{major}.{minor}.{patch}", major=int(major), minor=int(minor), prerelease=suffix is not None)
 
 
@@ -89,6 +91,56 @@ def check_packages(out_dir: pathlib.Path, expected_ids, version: str, tfm: str) 
             raise ReleaseError(f"{path} has no README")
 
 
+# What `dotnet list package --vulnerable|--deprecated` prints when it could not read its data source. The command still exits 0, so
+# the output is the verdict and anything unclear is a failure.
+AUDIT_FAILURE_MARKERS = (
+    "NU1900", "Unable to load the service index", "Failed to retrieve information", "Error occurred while getting",
+    "error:", "Response status code does not indicate success", "No such host is known", "Name or service not known",
+)
+
+
+def check_audit(text: str, kind: str) -> None:
+    """Fail closed: findings, audit-source errors and output that does not say 'no <kind> packages' for a project all fail."""
+    if f"has the following {kind} packages" in text or re.search(r"^\s+>\s", text, re.M):
+        raise ReleaseError(f"{kind} packages found")
+    for marker in AUDIT_FAILURE_MARKERS:
+        if marker in text:
+            raise ReleaseError(f"the {kind} audit could not complete ({marker!r} in the output); it is treated as a failure")
+    if f"has no {kind} packages" not in text:
+        raise ReleaseError(f"the {kind} audit output does not report any project as clean; it is treated as a failure")
+
+
+def _status(url: str) -> int:
+    import urllib.error
+    import urllib.request
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirect)
+    try:
+        with opener.open(urllib.request.Request(url, method="HEAD"), timeout=30) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def check_not_published(package_ids, version: str, status=_status) -> None:
+    """A re-run of a release must not look green because `dotnet nuget push --skip-duplicate` skipped what is already published."""
+    for package_id in package_ids:
+        lower = package_id.lower()
+        url = f"https://api.nuget.org/v3-flatcontainer/{lower}/{version.lower()}/{lower}.nuspec"
+        try:
+            code = status(url)
+        except Exception as error:  # network failure: unknown, so not safe to publish
+            raise ReleaseError(f"could not check whether {package_id} {version} exists on nuget.org: {error}") from error
+        if code == 200:
+            raise ReleaseError(f"{package_id} {version} is already published on nuget.org; a re-run would silently skip it")
+        if code != 404:
+            raise ReleaseError(f"unexpected answer {code} for {package_id} {version} on nuget.org")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="command", required=True)
@@ -102,9 +154,24 @@ def main(argv=None) -> int:
     p.add_argument("--version", required=True)
     p.add_argument("--tfm", help="default: <TargetFramework> of --props")
     p.add_argument("--props", default="Directory.Build.props")
+    a = sub.add_parser("audit")
+    a.add_argument("--kind", choices=["vulnerable", "deprecated"], required=True)
+    a.add_argument("--file", required=True)
+    n = sub.add_parser("not-published")
+    n.add_argument("--expected", help="space-separated package ids")
+    n.add_argument("--dir", help="folder with the packed <id>.<version>.nupkg files (ids are taken from the file names)")
+    n.add_argument("--version", required=True)
     args = ap.parse_args(argv)
     try:
-        if args.command == "tag":
+        if args.command == "audit":
+            check_audit(pathlib.Path(args.file).read_text(errors="replace"), args.kind)
+        elif args.command == "not-published":
+            ids = args.expected.split() if args.expected else [
+                f.name[: -len(f".{args.version}.nupkg")] for f in sorted(pathlib.Path(args.dir).glob(f"*.{args.version}.nupkg"))]
+            if not ids:
+                raise ReleaseError("no packages to check: pass --expected or a --dir that holds the packed packages")
+            check_not_published(ids, args.version)
+        elif args.command == "tag":
             result = check_tag(args.tag, pathlib.Path(args.props).read_text(), args.branches)
             print(f"version={result.version}")
             print(f"prerelease={'true' if result.prerelease else 'false'}")

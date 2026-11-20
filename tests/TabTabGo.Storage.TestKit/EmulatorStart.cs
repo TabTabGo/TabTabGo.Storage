@@ -15,8 +15,10 @@ public static class EmulatorStart
     /// <param name="name">Emulator name for the message (for example "Azurite").</param>
     /// <param name="start">The start action; it receives a token that is cancelled at the deadline.</param>
     /// <param name="timeout">Time limit; defaults to <see cref="TimeoutVariable"/> or three minutes.</param>
+    /// <param name="dispose">Disposes the half-started container when the start times out or fails; its own failure is swallowed.</param>
     /// <returns>A task that completes when the emulator has started.</returns>
-    public static async Task RunAsync(string name, Func<CancellationToken, Task> start, TimeSpan? timeout = null)
+    public static async Task RunAsync(string name, Func<CancellationToken, Task> start, TimeSpan? timeout = null,
+        Func<ValueTask>? dispose = null)
     {
         var limit = timeout ?? ParseTimeout(Environment.GetEnvironmentVariable(TimeoutVariable));
         using var cts = new CancellationTokenSource(limit);
@@ -26,6 +28,7 @@ public static class EmulatorStart
         }
         catch (Exception ex) when (ex is OperationCanceledException or TimeoutException)
         {
+            await DisposeQuietlyAsync(dispose).ConfigureAwait(false);
             throw new InvalidOperationException(
                 $"{name} did not start within {limit.TotalSeconds:0} s. Check that Docker is running and can pull the image; if the " +
                 $"Ryuk container cannot start (CI runners do not need it), set TESTCONTAINERS_RYUK_DISABLED=true. " +
@@ -33,7 +36,25 @@ public static class EmulatorStart
         }
         catch (Exception ex)
         {
+            await DisposeQuietlyAsync(dispose).ConfigureAwait(false);
             throw new InvalidOperationException($"{name} could not be started: {ex.Message}", ex);
+        }
+    }
+
+    private static async Task DisposeQuietlyAsync(Func<ValueTask>? dispose)
+    {
+        if (dispose is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await dispose().ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // The start failure is what matters; a container that cannot be disposed is left to Ryuk or the daemon.
         }
     }
 
