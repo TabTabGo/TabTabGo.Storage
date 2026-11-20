@@ -286,11 +286,12 @@ public class StorageDbContextAndProviderTests : IDisposable
     }
 
     [Fact]
-    public void StorageDbProvider_NullContext_DoesNotThrowOnSave()
+    public void StorageDbProvider_NullContext_Throws()
     {
-        using var provider = new StorageDbProvider(null!, NullLogger<StorageDbProvider>.Instance);
+        // Core 10 refuses a null context at construction (Core 8 accepted it and saved nothing); spec 3.4.
+        var ex = Assert.Throws<ArgumentNullException>(() => new StorageDbProvider(null!, NullLogger<StorageDbProvider>.Instance));
 
-        Assert.Equal(0, provider.SaveChanges());
+        Assert.Equal("context", ex.ParamName);
     }
 
     [Fact]
@@ -327,9 +328,9 @@ public class ExtraPropertiesCompatTests
         var file = fixture.Context.Set<File>().Single();
 
         Assert.Equal(3, file.ExtraProperties.Count);
-        Assert.Equal("1", file.ExtraProperties["a"].ToString());
-        Assert.Equal("x", file.ExtraProperties["b"].ToString());
-        Assert.Contains("nested", file.ExtraProperties["d"].ToString());
+        Assert.Equal("1", file.ExtraProperties["a"]!.ToString());
+        Assert.Equal("x", file.ExtraProperties["b"]!.ToString());
+        Assert.Contains("nested", file.ExtraProperties["d"]!.ToString());
     }
 
     [Fact]
@@ -347,6 +348,6 @@ public class ExtraPropertiesCompatTests
 
         using var other = fixture.NewContext();
 
-        Assert.Equal("v", other.Set<File>().Single().ExtraProperties["k"].ToString());
+        Assert.Equal("v", other.Set<File>().Single().ExtraProperties["k"]!.ToString());
     }
 }

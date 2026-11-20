@@ -508,7 +508,7 @@ public class FileServiceReplaceAndUpdateTests : IDisposable
         Assert.Equal("Order", stored.ReferenceType);
         Assert.Equal(55, stored.ReferenceId);
         Assert.Equal(12, stored.Duration);
-        Assert.Equal("v", stored.ExtraProperties["k"].ToString());
+        Assert.Equal("v", stored.ExtraProperties["k"]!.ToString());
     }
 
     [Fact]
@@ -592,9 +592,9 @@ public class FileServiceReplaceAndUpdateTests : IDisposable
         await h.Service.Update(file.FileId, JsonNode.Parse("""{"ExtraProperties":{"b":"y","c":true,"d":null}}""")!.AsObject());
 
         var extra = h.Reload(file.FileId).ExtraProperties;
-        Assert.Equal("1", extra["a"].ToString());
-        Assert.Equal("y", extra["b"].ToString());
-        Assert.Equal("True", extra["c"].ToString(), ignoreCase: true);
+        Assert.Equal("1", extra["a"]!.ToString());
+        Assert.Equal("y", extra["b"]!.ToString());
+        Assert.Equal("True", extra["c"]!.ToString(), ignoreCase: true);
         Assert.True(extra.ContainsKey("d"));
     }
 

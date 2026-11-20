@@ -108,23 +108,21 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     #region Reads
 
     /// <summary>Core list read, limited to files that are not soft-deleted.</summary>
-#pragma warning disable CS8765, CS8767, CS8620, CS8604
-    public override Task<IEnumerable<TFile>> GetList(Expression<Func<TFile?, bool>> query, string[]? includeProperties = null,
+    public override Task<IEnumerable<TFile>> GetList(Expression<Func<TFile, bool>> query, string[]? includeProperties = null,
         QueryFlags? flags = null, CancellationToken cancellationToken = default) =>
-        base.GetList(ActiveFilter.And<TFile>(query!)!, includeProperties, flags, cancellationToken);
+        base.GetList(ActiveFilter.And<TFile>(query), includeProperties, flags, cancellationToken);
 
     /// <summary>Core paged read, limited to files that are not soft-deleted.</summary>
-    public override Task<PageList<TFile>> GetPageList(Expression<Func<TFile?, bool>> query,
+    public override Task<PageList<TFile>> GetPageList(Expression<Func<TFile, bool>> query,
         Func<IQueryable<TFile>, IOrderedQueryable<TFile>>? orderBy = null, int page = 0, int pageSize = 25,
         string[]? includeProperties = null, QueryFlags? flags = null, CancellationToken cancellationToken = default) =>
-        base.GetPageList(ActiveFilter.And<TFile>(query!)!, orderBy, page, pageSize, includeProperties, flags, cancellationToken);
+        base.GetPageList(ActiveFilter.And<TFile>(query), orderBy, page, pageSize, includeProperties, flags, cancellationToken);
 
     /// <summary>OData read behind <c>GetPageList(odata)</c> and <c>GetViewModels</c>, limited to files that are not soft-deleted.</summary>
-    public override IQueryable<TFile?> GetQueryable(Microsoft.AspNetCore.OData.Query.ODataQueryOptions<TFile> query,
+    public override IQueryable<TFile> GetQueryable(Microsoft.AspNetCore.OData.Query.ODataQueryOptions<TFile> query,
         out int pageSize, out int skip, out int pageNumber, string[]? includeProperties = null,
         Expression<Func<TFile, bool>>? fixCriteria = null, QueryFlags? flags = null) =>
         base.GetQueryable(query, out pageSize, out skip, out pageNumber, includeProperties, ActiveFilter.And(fixCriteria), flags);
-#pragma warning restore CS8765, CS8767, CS8620, CS8604
 
     /// <inheritdoc />
     public async Task<FileResult> GetFile(long id, CancellationToken cancellationToken = default)
@@ -249,7 +247,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         metadata.IsCompressed = false;
         if (!_options.AllowMetadataExtraProperties)
         {
-            metadata.ExtraProperties = new Dictionary<string, object>();
+            metadata.ExtraProperties = new Dictionary<string, object?>();
         }
         else
         {
@@ -349,8 +347,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         // The caller may pass the tracked instance itself (load, edit, update): take its values before it is restored.
         var incomingCopy = (TFile)MemberwiseCloneMethod.Invoke(entity, null)!;
         incomingCopy.ExtraProperties = entity.ExtraProperties is null
-            ? new Dictionary<string, object>()
-            : new Dictionary<string, object>(entity.ExtraProperties);
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>(entity.ExtraProperties);
         entity = incomingCopy;
         var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
         EnsureDefined(entity.FileType);
@@ -481,7 +479,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         IsValidToUpdate(current, out validationErrorMessage) && IsValidToUpdate(merged, out validationErrorMessage);
 
     // Bounds the ExtraProperties bag (key count and serialized size) so a request body cannot grow a row without limit.
-    private void EnsureExtraPropertiesWithinLimits(IDictionary<string, object>? bag)
+    private void EnsureExtraPropertiesWithinLimits(IDictionary<string, object?>? bag)
     {
         if (bag is null || bag.Count == 0)
         {
@@ -507,8 +505,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     {
         var merged = (TFile)MemberwiseCloneMethod.Invoke(current, null)!;
         merged.ExtraProperties = current.ExtraProperties is null
-            ? new Dictionary<string, object>()
-            : new Dictionary<string, object>(current.ExtraProperties);
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>(current.ExtraProperties);
         applyClientChanges(merged);
         if (_options.AllowMetadataExtraProperties)
         {
@@ -909,8 +907,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         }
 
         target.ExtraProperties = truth.ExtraProperties is null
-            ? new Dictionary<string, object>()
-            : new Dictionary<string, object>(truth.ExtraProperties);
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>(truth.ExtraProperties);
     }
 
     private static ApiException NotFound(long id) =>

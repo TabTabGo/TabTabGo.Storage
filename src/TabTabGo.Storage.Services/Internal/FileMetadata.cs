@@ -43,7 +43,7 @@ internal static class FileMetadata<TFile>
         var referenceType = ReferenceType?.GetValue(file);
         var referenceId = ReferenceId?.GetValue(file);
         var duration = Duration?.GetValue(file);
-        var extra = file.ExtraProperties is null ? null : new Dictionary<string, object>(file.ExtraProperties);
+        var extra = file.ExtraProperties is null ? null : new Dictionary<string, object?>(file.ExtraProperties);
         return () =>
         {
             file.Title = title;
@@ -133,7 +133,7 @@ internal static class FileMetadata<TFile>
                     {
                         foreach (var (key, value) in extra)
                         {
-                            target.ExtraProperties ??= new Dictionary<string, object>();
+                            target.ExtraProperties ??= new Dictionary<string, object?>();
                             target.ExtraProperties[key] = value is null ? null! : Convert<object>(value, key);
                         }
                     }
@@ -229,14 +229,14 @@ internal static class FileMetadata<TFile>
         property.SetValue(target, value);
     }
 
-    private static void MergeExtra(TFile target, IDictionary<string, object>? extra)
+    private static void MergeExtra(TFile target, IDictionary<string, object?>? extra)
     {
         if (extra is null)
         {
             return;
         }
 
-        target.ExtraProperties ??= new Dictionary<string, object>();
+        target.ExtraProperties ??= new Dictionary<string, object?>();
         foreach (var pair in extra)
         {
             target.ExtraProperties[pair.Key] = pair.Value;

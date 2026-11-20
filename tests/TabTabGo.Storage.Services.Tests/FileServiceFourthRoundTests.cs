@@ -80,7 +80,7 @@ public class FileServiceExtraPropertiesOptionTests
 
         await h.Service.Update(file.FileId, patch);
 
-        Assert.Equal("scanner", h.Reload(file.FileId).ExtraProperties["source"].ToString());
+        Assert.Equal("scanner", h.Reload(file.FileId).ExtraProperties["source"]!.ToString());
     }
 
     [Fact]
@@ -180,7 +180,7 @@ public class FileServiceExtraPropertiesOptionTests
 
         var extra = h.Reload(file.FileId).ExtraProperties;
         Assert.Single(extra);
-        Assert.Equal("1", extra["a"].ToString());
+        Assert.Equal("1", extra["a"]!.ToString());
     }
 }
 

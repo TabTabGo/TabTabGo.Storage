@@ -146,7 +146,7 @@ public class EntityTests
         Assert.Equal(FileType.Image, back.FileType);
         Assert.Equal(9, back.ReferenceId);
         Assert.Equal(3, back.Duration);
-        Assert.Equal("v", back.ExtraProperties["k"].ToString());
+        Assert.Equal("v", back.ExtraProperties["k"]!.ToString());
     }
 
     [Fact]

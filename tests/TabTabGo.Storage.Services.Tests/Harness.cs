@@ -78,7 +78,7 @@ public sealed class FailingUnitOfWork(Microsoft.EntityFrameworkCore.DbContext co
     /// <summary>Number of times the service forced EF change detection.</summary>
     public int GetChangesCalls { get; private set; }
 
-    public override dynamic? GetChanges()
+    public override IReadOnlyList<TabTabGo.Core.Data.EntityChange> GetChanges()
     {
         GetChangesCalls++;
         return base.GetChanges();

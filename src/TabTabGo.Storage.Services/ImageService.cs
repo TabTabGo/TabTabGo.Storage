@@ -147,7 +147,7 @@ public class ImageService : IImageService
             _ => SKMatrix.Identity,
         };
         canvas.Concat(in matrix);
-        canvas.DrawBitmap(source, 0, 0);
+        canvas.DrawBitmap(source, 0, 0, SKSamplingOptions.Default);
         return target;
     }
 
