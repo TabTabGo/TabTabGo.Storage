@@ -177,9 +177,13 @@ public class HookedFileService : FileService<File>
         return Task.CompletedTask;
     }
 
+    /// <summary>Called inside <c>PostUpdate</c>, so a test can look at the state of the unit of work at that moment.</summary>
+    public Action? PostUpdateProbe { get; set; }
+
     public override Task PostUpdate(File entity, CancellationToken cancellationToken = default)
     {
         Events.Add("PostUpdate");
+        PostUpdateProbe?.Invoke();
         return Task.CompletedTask;
     }
 

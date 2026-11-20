@@ -348,20 +348,26 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The updated entity.</returns>
     public override Task<TFile> Update(long id, TFile entity, CancellationToken cancellationToken = default) =>
-        UpdateEntityAsync(id, entity, scope: null, afterCommit: null, cancellationToken);
+        UpdateEntityAsync(id, CopyIncoming(entity), scope: null, afterCommit: null, refuseRelocation: false, cancellationToken);
+
+    // The caller may pass the tracked instance itself (load, edit, update): take its values before it is restored. The copy is made
+    // once per call, before any retry, so a retried attempt applies the client's values and not the restored database values.
+    private static TFile CopyIncoming(TFile entity)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        var copy = (TFile)MemberwiseCloneMethod.Invoke(entity, null)!;
+        copy.ExtraProperties = entity.ExtraProperties is null
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>(entity.ExtraProperties);
+        return copy;
+    }
 
     // The entity update. With a scope the file is loaded inside it and must still be inside it after the save; the steps that must
     // not run before the commit (removing the old objects, PostUpdate) are handed to afterCommit instead of running here.
+    // `entity` is the private copy made by CopyIncoming; it is only read here, so every retry attempt can reuse it.
     private async Task<TFile> UpdateEntityAsync(long id, TFile entity, Expression<Func<TFile, bool>>? scope,
-        List<Func<CancellationToken, Task>>? afterCommit, CancellationToken cancellationToken)
+        List<Func<CancellationToken, Task>>? afterCommit, bool refuseRelocation, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(entity);
-        // The caller may pass the tracked instance itself (load, edit, update): take its values before it is restored.
-        var incomingCopy = (TFile)MemberwiseCloneMethod.Invoke(entity, null)!;
-        incomingCopy.ExtraProperties = entity.ExtraProperties is null
-            ? new Dictionary<string, object?>()
-            : new Dictionary<string, object?>(entity.ExtraProperties);
-        entity = incomingCopy;
         var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken, scope).ConfigureAwait(false);
         EnsureDefined(entity.FileType);
         EnsureValidToUpdate(current, merged => FileMetadata<TFile>.CopyFrom(merged, entity, _options.AllowMetadataExtraProperties), 4001);
@@ -372,6 +378,14 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         {
             FileMetadata<TFile>.CopyFrom(current, entity, _options.AllowMetadataExtraProperties);
             var newType = entity.FileType == FileType.Unknown ? current.FileType : entity.FileType;
+            if (refuseRelocation && newType != current.FileType)
+            {
+                // Moving the objects removes the old ones after the unit of work returns; inside the host's transaction that is
+                // before the host commits, so a later rollback would lose them.
+                throw new ApiException("The file type cannot be changed by a scoped update inside a transaction owned by the caller.",
+                    null, LogLevel.Warning, null, HttpStatusCode.Conflict, "RELOCATION_IN_HOST_TRANSACTION");
+            }
+
             return await FinishUpdateAsync(current, newType, cancellationToken, scope, afterCommit).ConfigureAwait(false);
         }
         catch
@@ -496,12 +510,15 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             return await UpdateChanges(id, entity, cancellationToken).ConfigureAwait(false);
         }
 
-        ArgumentNullException.ThrowIfNull(entity);
+        // One client copy for every attempt: a retry clears the tracker and the failed attempt restored the caller's tracked
+        // instance, so copying inside the operation would replay the reverted values and silently commit nothing.
+        var incoming = CopyIncoming(entity);
+        var hostTransaction = _unitOfWork.HasActiveTransaction;
         var afterCommit = new List<Func<CancellationToken, Task>>();
         var updated = await _unitOfWork.ExecuteInTransactionAsync(ct =>
         {
             afterCommit.Clear();
-            return UpdateEntityAsync(id, entity, scope, afterCommit, ct);
+            return UpdateEntityAsync(id, incoming, scope, afterCommit, hostTransaction, ct);
         }, cancellationToken).ConfigureAwait(false);
         foreach (var step in afterCommit)
         {
@@ -1057,6 +1074,17 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         target.ExtraProperties = truth.ExtraProperties is null
             ? new Dictionary<string, object?>()
             : new Dictionary<string, object?>(truth.ExtraProperties);
+    }
+
+    /// <summary>
+    /// Core 10's host-facing check of the <c>ExtraProperties</c> bag; applies this service's own key and size limits
+    /// (<see cref="StorageServiceOptions.MaxExtraPropertyKeys"/>, <see cref="StorageServiceOptions.MaxExtraPropertiesBytes"/>).
+    /// </summary>
+    /// <param name="entity">The file whose bag is checked.</param>
+    public override void EnsureExtraPropertiesWithinLimits(TFile entity)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        EnsureExtraPropertiesWithinLimits(entity.ExtraProperties);
     }
 
     private static ApiException NotFound(long id) =>
