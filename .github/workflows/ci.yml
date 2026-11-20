@@ -76,13 +76,13 @@ jobs:
         shell: bash
         run: |
           dotnet list TabTabGo.Storage.sln package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
-          if grep -qE "has the following vulnerable packages|^\s+>\s" vulnerable.txt; then echo "vulnerable packages found"; exit 1; fi
+          python3 scripts/release_verify.py audit --kind vulnerable --file vulnerable.txt
 
       - name: Deprecated packages
         shell: bash
         run: |
           dotnet list TabTabGo.Storage.sln package --deprecated 2>&1 | tee deprecated.txt
-          if grep -qE "has the following deprecated packages" deprecated.txt; then echo "deprecated packages found"; exit 1; fi
+          python3 scripts/release_verify.py audit --kind deprecated --file deprecated.txt
 
       - name: Pack (dry run; package validation and NU5104 run, nothing is pushed)
         run: dotnet pack TabTabGo.Storage.sln -c Release --no-build -o out
