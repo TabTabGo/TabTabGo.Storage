@@ -173,9 +173,6 @@ jobs:
         run: dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
 
       - name: API compatibility against the published 8.0.0 libraries (v10 is additive-only)
-        env:
-          # the pinned ApiCompat tool targets .NET 8; the job installs only the SDK from global.json
-          DOTNET_ROLL_FORWARD: Major
         run: |
           dotnet tool restore
           python3 scripts/apicompat.py

@@ -52,9 +52,6 @@ jobs:
 
       - name: API compatibility against the published 8.0.0 libraries (v10 is additive-only; the SHA-256 pins are recorded after 8.0.0 is published)
         if: matrix.os == 'ubuntu-latest'
-        env:
-          # the pinned ApiCompat tool targets .NET 8; the job installs only the SDK from global.json
-          DOTNET_ROLL_FORWARD: Major
         run: |
           dotnet tool restore
           python3 -m unittest scripts/test_apicompat_download.py scripts/test_release_verify.py
