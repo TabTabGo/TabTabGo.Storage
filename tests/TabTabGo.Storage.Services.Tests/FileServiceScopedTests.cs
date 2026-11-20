@@ -234,6 +234,26 @@ public class FileServiceScopedTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateChangesScoped_PostUpdate_AndTheOldObjectRemoval_RunAfterTheCommit()
+    {
+        var file = await UploadAsync(Mine);
+        var change = FileServiceHarness.Meta(FileType.PDF);
+        change.ReferenceId = Mine;
+        bool? transactionOpenInPostUpdate = null;
+        IReadOnlyList<string>? keysInPostUpdate = null;
+        _h.Service.PostUpdateProbe = () =>
+        {
+            transactionOpenInPostUpdate = _h.Uow.HasActiveTransaction;
+            keysInPostUpdate = _h.Storage.Keys().ToList();
+        };
+
+        await _h.Service.UpdateChanges(file.FileId, change, InScope, CancellationToken.None);
+
+        Assert.False(transactionOpenInPostUpdate);   // the unit of work has committed before the side effects run
+        Assert.Equal([$"PDF/{file.FilePath}"], keysInPostUpdate);   // the old object was removed before PostUpdate
+    }
+
+    [Fact]
     public async Task UpdateChangesScoped_NullScope_IsTheUnscopedUpdate()
     {
         var file = await UploadAsync(Theirs);
