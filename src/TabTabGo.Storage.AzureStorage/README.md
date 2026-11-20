@@ -28,8 +28,8 @@ Options are validated at startup: a connection string, or `ServiceUri` together 
 - Container names: unsafe input (`../x`, `a/b`, control characters) is a 400; a safe name maps exactly as 6.x did
   (`my_files` -> `myfiles`); only names Azure used to reject (`a--b`, fewer than 3 characters) are adjusted.
 - Overwrite is the default; `StorageWriteOptions.Overwrite = false` uses an `If-None-Match: *` condition.
-- Dependency note: the v8 line pins `Azure.Storage.Blobs` 12.27.0 because 12.28+ forces `Microsoft.Extensions.*` and
-  `System.Text.Json` 10.x onto net8.0; the v10 line uses 12.30.1.
+- Dependency note: this line uses `Azure.Storage.Blobs` 12.30.1. The v8 line pins 12.27.0 because 12.28+ forces
+  `Microsoft.Extensions.*` and `System.Text.Json` 10.x onto net8.0.
 - A SAS URL is served by Azure without our headers (no `nosniff`), so the response type is always the object's own
   extension type and `text/plain` is never inline.
 - Tests: mock `BlobServiceClient`/`BlobClient` (they are mockable), or run Azurite through Testcontainers.

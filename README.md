@@ -2,7 +2,9 @@
 
 File storage for .NET: one port (`IStorageProvider`), three providers (AWS S3, Azure Blob, local disk), a `File`
 entity and `FileService<TFile>` (upload, replace, update, read, delete, image thumbnails), and an EF Core model
-builder. This is the **v8 line** (`net8.0`, package version `8.x`, depends on `TabTabGo.Core` 8.0.1 or later 8.x).
+builder. This is the **v10 line** (`net10.0`, package version `10.x`, depends on `TabTabGo.Core` 10.0.0 or later 10.x).
+The v8 line (`net8.0`, Core 8.0.1+) carries the same fixes for applications that have not moved to .NET 10; the .NET 8 runtime
+is out of support from 2026-11-10.
 
 ## Packages
 
@@ -94,11 +96,28 @@ Every provider passes the same contract suite:
   and 7 days.
 - Thumbnail generation rejects images over `ImageServiceOptions.MaxPixels` (decompression-bomb guard).
 
+## Upgrading from 8.x to 10.0.0
+
+v10 only adds API relative to 8.0.0 (`python3 scripts/apicompat.py` proves it). What changes:
+
+| Change | Migration |
+|---|---|
+| `net10.0` only; `TabTabGo.Core` `[10.0.0, 11.0.0)`; EF Core / Microsoft.Extensions 10.0.14 | consume the Core 10 line |
+| Nullable reference warnings are errors in this repository; `ExtraProperties` is `IDictionary<string, object?>` (Core 10) | annotate; no runtime change |
+| `StorageDbProvider(null, logger)` throws `ArgumentNullException` (Core 10 refuses a null context; Core 8 accepted it and saved nothing) | pass the context |
+| Core 10 scoped overloads `Delete(id, scope)`, `Delete(ids, scope)`, `CanDelete(id/ids, scope)`, `UpdateChanges(id, entity, scope)` run through `FileService` (same hooks, same allow-list, restore of storage-owned state, soft delete): a file outside the scope or already soft-deleted is a 404; `UpdateChanges` with a scope runs in a transaction and is rolled back (404) when the change leaves the scope; the old objects are removed and `PostUpdate` runs after the commit | use them for tenant scoping; do not override `UpdateChanges(id, entity, ct)` expecting the scoped overload to call it |
+| `PreferServiceKeyPredicate` is `true`: Core's `CountByKeys` and `GetDeleteValidationAsync` hide soft-deleted files | none |
+| `GetChanges()` of the unit of work returns `IReadOnlyList<EntityChange>` (Core 10) | custom `IUnitOfWork` wrappers must follow |
+| SkiaSharp 4.154.0 (was 3.119.4) | none for callers (the ImageService tests assert dimensions, formats and EXIF orientation on 4.x) |
+| `Azure.Storage.Blobs` 12.30.1 (was 12.27.0) | none |
+| `Microsoft.Extensions.Hosting.Abstractions`, `Options`, `Logging.Abstractions` 10.0.14 | none |
+| Tests run on Microsoft.Testing.Platform: `dotnet test --solution TabTabGo.Storage.sln` | see Building |
+
 ## Upgrading from 6.x
 
 | Change | Migration |
 |---|---|
-| `net8.0` only; Core 8.0.1 | consume the v8 Core line |
+| `net10.0` only (8.x: `net8.0`); Core 10.0.0 (8.x: 8.0.1) | consume the matching Core line |
 | AWS SDK v3 to v4 | move every `AWSSDK.*` package of the app to 4.x |
 | `IFile.FormFile` removed | `Upload(entity, formFile.ToFileUpload())`; `Create(entity)` now returns 400 `FILE_CONTENT_REQUIRED`. Add `<FrameworkReference Include="Microsoft.AspNetCore.App" />` to projects that used `IFormFile` through this package |
 | Updates ignore storage-owned fields | use `Replace(id, upload)` to change content |
@@ -135,26 +154,29 @@ Every provider passes the same contract suite:
 ```bash
 dotnet restore
 dotnet build -c Release -warnaserror
-dotnet test -c Release
+dotnet test --solution TabTabGo.Storage.sln -c Release      # Microsoft.Testing.Platform runner (global.json)
+dotnet test --solution TabTabGo.Storage.sln -c Release --no-build --coverlet --coverlet-output-format cobertura --results-directory coverage
+python3 scripts/coverage-gate.py coverage                   # 85 % lines / 75 % branches
 ```
 
-`global.json` pins the SDK. While `TabTabGo.Core` 8.0.1 is not on nuget.org, build against a local Core:
+`global.json` pins the SDK (10.0.401). While `TabTabGo.Core` 10.0.0 is not on nuget.org, build against a local Core:
 
 ```bash
-python3 scripts/local-core.py                       # packs Core v8 as 8.0.1-local.<sha> and writes nuget.local.config (git-ignored)
-export TabTabGoCoreVersion=8.0.1-local.<sha>        # printed by the script; overrides the [8.0.1, 9.0.0) range
+python3 scripts/local-core.py                       # packs Core v10 as 10.0.0-local.<sha> and writes nuget.local.config (git-ignored)
+export TabTabGoCoreVersion=10.0.0-local.<sha>       # printed by the script; overrides the [10.0.0, 11.0.0) range
 dotnet restore TabTabGo.Storage.sln --configfile nuget.local.config
 dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
 ```
 
 The local packages live in `tabtabgo/.local-nuget` (never committed); the Core worktree is not touched.
 **Unset the variable when you are done** (`unset TabTabGoCoreVersion`): a leftover `export` keeps every build on the
-local Core even after 8.0.1 is published on nuget.org. Never publish
+local Core even after 10.0.0 is published on nuget.org. Never publish
 with the variable set: `release.yml` refuses it. Emulator tests (LocalStack 4.0, Azurite) need Docker and skip
 themselves without it; set `TTG_SKIP_EMULATORS=true` to skip them explicitly.
 
-API compatibility against the published 6.0.8.4 libraries is checked by `python3 scripts/apicompat.py` (every
-suppression in `compat/` cites its spec 6.4 row); `python3 scripts/mutation-check.py` re-introduces the registered bugs
+API compatibility against the 8.0.0 libraries (additive-only) is checked by `python3 scripts/apicompat.py` (CI: the
+published packages, SHA-256 pinned once 8.0.0 is published; locally `--baseline-dir` with packages packed from the v8 worktree;
+every suppression in `compat/` would have to cite its spec row, and there are none); `python3 scripts/mutation-check.py` re-introduces the registered bugs
 and proves a test kills each one; `Golden/capture/capture.py` re-captures the EF model golden files from the 6.0.8.4 sources.
 
 **Releasing.** `.github/workflows/release.yml` publishes only from a tag `vMAJOR.MINOR.PATCH[-rc.N]` whose major
