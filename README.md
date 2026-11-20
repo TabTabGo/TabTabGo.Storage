@@ -17,8 +17,8 @@ that are not on .NET 11; the .NET 8 runtime is out of support from 2026-11-10.
 | `TabTabGo.Storage.Azure` | Azure Blob provider (connection string or managed identity) |
 | `TabTabGo.Storage.FileStorage` | Local file-system provider |
 
-Release lines: **v8** (.NET 8 - note .NET 8 support ends 2026-11-10, so v8 is a bridge line), **v10** (this one: .NET 10 LTS,
-the long-term home) and **v11** (.NET 11 pre-releases). Fixes land on v8 first and are merged forward.
+Release lines: **v8** (.NET 8 - note .NET 8 support ends 2026-11-10, so v8 is a bridge line), **v10** (.NET 10 LTS, the
+long-term home) and **v11** (this one: .NET 11, currently `11.0.0-rc.N`). Fixes land on v8 first and are merged forward.
 
 ## Choosing a provider
 
