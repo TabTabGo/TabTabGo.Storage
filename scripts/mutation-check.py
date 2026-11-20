@@ -42,15 +42,15 @@ M = [
      "        catch\n        {\n            await CleanupAsync(stored).ConfigureAwait(false);\n            throw;\n        }\n\n        await PostCreate", "        catch\n        {\n            throw;\n        }\n\n        await PostCreate",
      "upload: stored objects are not removed when the insert fails"),
     ("H1", "C", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
-     "        RestoreOwned(tracked, truth);\n        return tracked;", "        return tracked;", "mass assignment: tracked storage-owned fields are used as is"),
+     "        RestoreOwned(tracked, truth);\n        EnsureNoPendingNavigationChange(tracked, truth);", "        EnsureNoPendingNavigationChange(tracked, truth);", "mass assignment: tracked storage-owned fields are used as is"),
     ("SoftDelete", "C", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
-     "        file.IsEnabled = false;\n        await _unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);\n        await PostDelete(file, cancellationToken)",
-     "        await HardDeleteAsync([file], cancellationToken).ConfigureAwait(false);\n        await PostDelete(file, cancellationToken)", "Delete(id) hard-deletes instead of soft-deleting"),
+     "        file.IsEnabled = false;\n        file.UpdatedDate = _timeProvider.GetUtcNow();\n        try",
+     "        await HardDeleteAsync([file], bulk: false, purge: false, cancellationToken).ConfigureAwait(false);\n        file.UpdatedDate = _timeProvider.GetUtcNow();\n        try", "Delete(id) hard-deletes instead of soft-deleting"),
     ("X-3", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
      "        EnsureValidToUpdate(file, _ => { }, 4001);\n\n        await PreUpdate(file, file, cancellationToken)", "        await PreUpdate(file, file, cancellationToken)", "Replace skips IsValidToUpdate"),
     ("X-4", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
-     "        EnsureAllDeletable(files);\n        await PreDelete(files, cancellationToken).ConfigureAwait(false);\n        foreach (var file in files)\n        {\n            file.IsEnabled = false;",
-     "        await PreDelete(files, cancellationToken).ConfigureAwait(false);\n        foreach (var file in files)\n        {\n            file.IsEnabled = false;", "bulk Delete(ids) skips IsValidToDelete"),
+     "        EnsureAllDeletable(files);\n        await RunPreDeleteAsync(files, bulk: true, cancellationToken)",
+     "        await RunPreDeleteAsync(files, bulk: true, cancellationToken)", "bulk Delete(ids) skips IsValidToDelete"),
     ("F-5", "M", "FileStorage.Tests", "src/TabTabGo.Storage.FileStorage/Services/PathService.cs",
      "            if (underWebRoot || underWwwroot)", "            if (false)", "no warning when the storage root is under wwwroot"),
     ("F-6", "M", "FileStorage.Tests", "src/TabTabGo.Storage.FileStorage/FileStorageProvider.cs",
@@ -92,8 +92,9 @@ M = [
     ("N2", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
      "            property.SetValue(target, property.GetValue(truth));", "            _ = property;", "tracked host columns / UpdatedBy are not restored from the database"),
     ("N2x", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
-     "        target.ExtraProperties = truth.ExtraProperties is null\n            ? new Dictionary<string, object>()\n            : new Dictionary<string, object>(truth.ExtraProperties);\n    }",
-     "    }", "tracked ExtraProperties are not restored"),
+     ["        target.ExtraProperties = truth.ExtraProperties is null\n            ? new Dictionary<string, object>()\n            : new Dictionary<string, object>(truth.ExtraProperties);\n    }",
+      "        target.ExtraProperties = truth.ExtraProperties is null\n            ? new Dictionary<string, object?>()\n            : new Dictionary<string, object?>(truth.ExtraProperties);\n    }"],
+     ["    }", "    }"], "tracked ExtraProperties are not restored"),
     ("N3", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
      "            await PreDelete(file, ct).ConfigureAwait(false);", "            await Task.CompletedTask;", "bulk and purge deletes skip the single-entity PreDelete hook"),
     ("N3b", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
@@ -135,7 +136,7 @@ M = [
     ("R4-B1", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
      "includeProperties, ActiveFilter.And(fixCriteria), flags);", "includeProperties, fixCriteria, flags);", "OData reads pass the caller's criteria without the active filter (soft-deleted rows returned)"),
     ("R4-B2", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
-     "base.GetList(ActiveFilter.And<TFile>(query!)!, includeProperties", "base.GetList(query!, includeProperties", "GetList returns soft-deleted rows"),
+     ["base.GetList(ActiveFilter.And<TFile>(query!)!, includeProperties", "base.GetList(ActiveFilter.And<TFile>(query), includeProperties"], ["base.GetList(query!, includeProperties", "base.GetList(query, includeProperties"], "GetList returns soft-deleted rows"),
     ("R5-G1", "M", "Tests", "src/TabTabGo.Storage/ContentTypes/ContentDispositionFormatter.cs",
      "Rune.GetUnicodeCategory(rune) != System.Globalization.UnicodeCategory.Format", "true", "non-BMP format characters (tag characters, musical controls) survive"),
     ("R5-G2", "M", "Tests", "src/TabTabGo.Storage/ContentTypes/ContentDispositionFormatter.cs",
@@ -191,6 +192,15 @@ def main() -> int:
         if run(["git", "diff", "--quiet", "--", rel]).returncode != 0:
             sys.exit(f"{rel} has uncommitted changes; commit or stash first")
         text = path.read_text()
+        # A row may carry alternatives (old and new as equal-length lists): the same mutant on lines whose code differs only by
+        # nullability annotations (v8 versus v10 and later). The first alternative found in the file is used.
+        if isinstance(old, list):
+            for candidate_old, candidate_new in zip(old, new):
+                if candidate_old in text:
+                    old, new = candidate_old, candidate_new
+                    break
+            else:
+                old, new = old[0], new[0]
         if old not in text:
             rows.append((rid, sev, what, "STALE", "mutation text not found - update the table"))
             continue
