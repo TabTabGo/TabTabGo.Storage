@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
-"""Assembly-mode API compatibility check of the v8 assemblies against the published 6.0.8.4 libraries.
+"""Assembly-mode API compatibility check of the v10 assemblies against the 8.0.0 libraries (the v8 line).
 
-Package validation (EnablePackageValidation) compares nothing here: every 6.0.8.4 asset is netstandard2.0 or net6.0, so
-it only reports PKV006 (target framework dropped). This script downloads the 6.0.8.4 packages from nuget.org, takes
-their lib assembly and runs Microsoft.DotNet.ApiCompat.Tool (pinned in .config/dotnet-tools.json) against the freshly
-built net8.0 assembly of this repository.
+v10 may only ADD API relative to v8 (additive-only rule); every break must be a deliberate row in EXACT below. Package
+validation compares the package, not the assembly, so this script takes the baseline package's lib assembly and runs
+Microsoft.DotNet.ApiCompat.Tool (pinned in .config/dotnet-tools.json) against the freshly built net10.0 assembly.
 
-    python3 scripts/apicompat.py            # check: fails on any break that is not in compat/<assembly>.suppressions.xml
-    python3 scripts/apicompat.py --update   # regenerate compat/*.suppressions.xml; every entry must match a RULES row
-                                            # (spec 6.4 breaking-change id) or the script fails and lists what is unmapped
+    python3 scripts/apicompat.py                            # CI: download 8.0.0 from nuget.org (SHA-256 pinned below)
+    python3 scripts/apicompat.py --baseline-dir DIR         # local: use DIR/<package>.8.0.0.nupkg built from the v8 worktree
+    python3 scripts/apicompat.py --update [--baseline-dir]  # regenerate compat/*.suppressions.xml; every entry must match an
+                                                            # EXACT row or the script fails and lists what is unmapped
 
-Build first: dotnet build TabTabGo.Storage.sln -c Release. The downloaded packages are cached under
-artifacts/apicompat-baseline/ (git-ignored). Known gaps: ApiCompat does not report a public field turned into a property
-as a distinct break the way source compilers see it (spec 6.4 SB14, FileResult), and behaviour changes (SB6-SB9, SB16, SB17,
-SB21) are not API changes at all; both are covered by the README upgrade table and by tests.
+Build first: dotnet build TabTabGo.Storage.sln -c Release. Downloaded packages are cached under artifacts/apicompat-baseline/
+(git-ignored); a --baseline-dir package is extracted fresh on every run and never cached. The 8.0.0 SHA-256 values are recorded
+after 8.0.0 is published (see BASELINE_SHA256): without them the download mode refuses to run, so a missing pin can never pass
+silently. Known gap: ApiCompat does not report a public field turned into a property as a distinct break the way source
+compilers see it; behaviour changes are not API changes at all; both are covered by the README upgrade table and by tests.
 """
 import argparse
 import hashlib
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -29,49 +31,27 @@ import zipfile
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CACHE = REPO / "artifacts" / "apicompat-baseline"
 COMPAT = REPO / "compat"
-BASELINE = "6.0.8.4"
+BASELINE = "8.0.0"
 
 # package id, folder under src, baseline lib TFM
 PACKAGES = [
-    ("TabTabGo.Storage", "TabTabGo.Storage", "netstandard2.0"),
-    ("TabTabGo.Storage.Services", "TabTabGo.Storage.Services", "net6.0"),
-    ("TabTabGo.Storage.Data.EF", "TabTabGo.Storage.Data.EF", "net6.0"),
-    ("TabTabGo.Storage.Aws", "TabTabGo.Storage.Aws", "net6.0"),
-    ("TabTabGo.Storage.Azure", "TabTabGo.Storage.AzureStorage", "netstandard2.0"),
-    ("TabTabGo.Storage.FileStorage", "TabTabGo.Storage.FileStorage", "net6.0"),
+    ("TabTabGo.Storage", "TabTabGo.Storage", "net8.0"),
+    ("TabTabGo.Storage.Services", "TabTabGo.Storage.Services", "net8.0"),
+    ("TabTabGo.Storage.Data.EF", "TabTabGo.Storage.Data.EF", "net8.0"),
+    ("TabTabGo.Storage.Aws", "TabTabGo.Storage.Aws", "net8.0"),
+    ("TabTabGo.Storage.Azure", "TabTabGo.Storage.AzureStorage", "net8.0"),
+    ("TabTabGo.Storage.FileStorage", "TabTabGo.Storage.FileStorage", "net8.0"),
 ]
+RIGHT_TFM = "net10.0"
 
-# Exact suppression targets -> (spec 6.4 row, reason). A break that is not listed here is NOT auto-labelled: --update fails and
+# Exact suppression targets -> (spec row, reason). A break that is not listed here is NOT auto-labelled: --update fails and
 # lists it, so a new break needs a deliberate row (substring rules would have labelled an unrelated change by accident).
-EXACT = {
-    "T:TabTabGo.Storage.AzureStorage.AzureCompositionRoot": ("SB10", "LightInject composition root removed; use AddTabTabGoAzureBlobStorage()"),
-    "T:TabTabGo.Storage.FileStorage.FileCompositionRoot": ("SB10", "LightInject composition root removed; use AddTabTabGoFileStorage()"),
-    "M:TabTabGo.Storage.FileStorage.Services.PathService.#ctor(Microsoft.AspNetCore.Hosting.IHostingEnvironment,Microsoft.Extensions.Options.IOptions{TabTabGo.Storage.Services.PathSettings},Microsoft.Extensions.Logging.ILogger{TabTabGo.Storage.FileStorage.Services.PathService})":
-        ("SB13", "PathService takes IHostEnvironment instead of IHostingEnvironment"),
-    "T:ImageSizeExtensions": ("SB15", "ImageSizeExtensions moved from the global namespace to TabTabGo.Storage.Services"),
-    "M:TabTabGo.Storage.Services.FileService`1.#ctor(TabTabGo.Core.Infrastructure.Data.IUnitOfWork,Microsoft.Extensions.Logging.ILogger{TabTabGo.Storage.Services.FileService{`0}},TabTabGo.Storage.IStorageProvider,TabTabGo.Storage.Services.IImageService)":
-        ("SB2", "FileService constructor: IUnitOfWork moved from TabTabGo.Core.Infrastructure.Data to TabTabGo.Core.Data (Core 8 API, spec 3.4)"),
-    "M:TabTabGo.Storage.Entities.File.get_FormFile": ("SB4", "File.FormFile removed; upload content is a FileUpload (ADR 0004)"),
-    "M:TabTabGo.Storage.Entities.File.set_FormFile(Microsoft.AspNetCore.Http.IFormFile)": ("SB4", "File.FormFile removed; upload content is a FileUpload (ADR 0004)"),
-    "M:TabTabGo.Storage.Entities.IFile.get_FormFile": ("SB4", "IFile.FormFile removed; upload content is a FileUpload (ADR 0004)"),
-    "M:TabTabGo.Storage.Entities.IFile.set_FormFile(Microsoft.AspNetCore.Http.IFormFile)": ("SB4", "IFile.FormFile removed; upload content is a FileUpload (ADR 0004)"),
-    "M:TabTabGo.Storage.Services.IFileService`1.ListAsync(TabTabGo.Storage.Models.FileListQuery,System.Linq.Expressions.Expression{System.Func{`0,System.Boolean}},System.Threading.CancellationToken)":
-        ("SB22", "IFileService<TFile>.ListAsync added (interface member; implementers must add it)"),
-    "M:TabTabGo.Storage.Services.IFileService`1.Replace(System.Int64,TabTabGo.Storage.Models.FileUpload,System.Threading.CancellationToken)":
-        ("SB22", "IFileService<TFile>.Replace added (interface member; implementers must add it)"),
-    "M:TabTabGo.Storage.Services.IFileService`1.Upload(`0,TabTabGo.Storage.Models.FileUpload,System.Threading.CancellationToken)":
-        ("SB22", "IFileService<TFile>.Upload added (interface member; implementers must add it)"),
-}
+# v8 -> v10 has none yet: the v10 line is additive. Add a row here (with the spec id) before accepting any break.
+EXACT = {}
 
-# SHA-256 of the published 6.0.8.4 packages, so a tampered download or cache cannot change the baseline.
-BASELINE_SHA256 = {
-    "TabTabGo.Storage": "6d68c0e4155e51f2dce5082c29dc47573c46be556fa49e8e61d3a9b6323b21ad",
-    "TabTabGo.Storage.Services": "73302b34d227beb4104b60402212eb651bbd198ea0f5ab8edf545a639645aff2",
-    "TabTabGo.Storage.Data.EF": "9ab2108dfacdc375811464f747ab6c276009759c546e511c7e9797a6700bcec5",
-    "TabTabGo.Storage.Aws": "81d745490ddfaa9e79f08edef51fba5be316355fdcd24d16c04fd1d5b4baa80f",
-    "TabTabGo.Storage.Azure": "7ebc34b12e0325360ed56d90dbaae059476f231327a8323d8f6ae50a72b30b6a",
-    "TabTabGo.Storage.FileStorage": "0da22249cf854d43846cbfa2add1bff0bd1e9e71fd52bdd3a1c3fbb901418c3e",
-}
+# SHA-256 of the published 8.0.0 packages, so a tampered download or cache cannot change the baseline. Filled in when 8.0.0 is
+# published (run the release workflow's pack output through `sha256sum`); empty means "download mode refuses to run".
+BASELINE_SHA256 = {}
 
 
 def tool(*args):
@@ -112,7 +92,26 @@ def download(url: str, dest: pathlib.Path, opener=urllib.request.urlopen, sleep=
              f"({DOWNLOAD_TIMEOUT_SECONDS} s timeout each): {last}. Check the network or proxy and rerun.")
 
 
-def fetch(package: str) -> pathlib.Path:
+def fetch_local(package: str, baseline_dir: pathlib.Path) -> pathlib.Path:
+    """Extract DIR/<package>.<BASELINE>.nupkg into a fresh folder (a locally built baseline is never cached or pinned)."""
+    nupkg = baseline_dir / f"{package}.{BASELINE}.nupkg"
+    if not nupkg.exists():
+        sys.exit(f"{nupkg} not found: pack the v8 worktree first (dotnet pack TabTabGo.Storage.sln -c Release -o {baseline_dir})")
+    dest = CACHE / "local" / package
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    with zipfile.ZipFile(nupkg) as z:
+        z.extractall(dest)
+    return dest
+
+
+def fetch(package: str, baseline_dir: pathlib.Path | None = None) -> pathlib.Path:
+    if baseline_dir is not None:
+        return fetch_local(package, baseline_dir)
+    if package not in BASELINE_SHA256:
+        sys.exit(f"No pinned SHA-256 for {package} {BASELINE}: record the published package hashes in BASELINE_SHA256 after 8.0.0 "
+                 "is published, or pass --baseline-dir with packages built from the v8 worktree")
     dest = CACHE / package
     marker = dest / ".done"
     nupkg = CACHE / f"{package}.{BASELINE}.nupkg"
@@ -133,10 +132,10 @@ def fetch(package: str) -> pathlib.Path:
     return dest
 
 
-def paths(package: str, folder: str, tfm: str):
+def paths(package: str, folder: str, tfm: str, baseline_dir: pathlib.Path | None = None):
     asm = "TabTabGo.Storage.Azure" if package == "TabTabGo.Storage.Azure" else package
-    left_dir = fetch(package) / "lib" / tfm
-    right_dir = REPO / "src" / folder / "bin" / "Release" / "net8.0"
+    left_dir = fetch(package, baseline_dir) / "lib" / tfm
+    right_dir = REPO / "src" / folder / "bin" / "Release" / RIGHT_TFM
     if not (right_dir / f"{asm}.dll").exists():
         sys.exit(f"Build first: {right_dir / (asm + '.dll')} not found (dotnet build TabTabGo.Storage.sln -c Release)")
     return asm, left_dir, right_dir
@@ -166,11 +165,12 @@ def annotate(raw: str, package: str):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--update", action="store_true", help="regenerate compat/*.suppressions.xml")
+    ap.add_argument("--baseline-dir", type=pathlib.Path, help="folder with locally packed v8 packages (<id>.8.0.0.nupkg)")
     args = ap.parse_args()
     COMPAT.mkdir(exist_ok=True)
     failed = False
     for package, folder, tfm in PACKAGES:
-        asm, left, right = paths(package, folder, tfm)
+        asm, left, right = paths(package, folder, tfm, args.baseline_dir)
         suppressions = COMPAT / f"{asm}.suppressions.xml"
         common = ["--left-assembly", str(left / f"{asm}.dll"), "--right-assembly", str(right / f"{asm}.dll"),
                   "--left-assembly-references", str(left), "--right-assembly-references", str(right)]

@@ -151,6 +151,23 @@ M = [
     ("R6-4", "L", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
      "        // Change detection scans every tracked entity: run it once for the batch, then compare each file.\n        _ = _unitOfWork.GetChanges();\n",
      "", "batch loads stop forcing change detection (navigation edits go undetected)"),
+    ("V10-1", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "LoadTrackedAsync(id, includeDisabled: false, cancellationToken, scope)", "LoadTrackedAsync(id, includeDisabled: false, cancellationToken)",
+     "scoped soft Delete ignores the scope (cross-tenant delete)"),
+    ("V10-2", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "if (scope is not null && !await StillInScopeAsync(current.FileId, scope, ct).ConfigureAwait(false))", "if (false)",
+     "scoped UpdateChanges does not check that the file is still in scope after the save"),
+    ("V10-3", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "protected override bool PreferServiceKeyPredicate => true;", "protected override bool PreferServiceKeyPredicate => false;",
+     "inherited bulk helpers (CountByKeys, GetDeleteValidationAsync) see soft-deleted files"),
+    ("V10-4", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "if (missing is not null)", "if (false)", "scoped bulk Delete silently skips ids outside the scope"),
+    ("V10-5", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "ActiveFilter.AndAlso(GetKeyPredicate(id), scope), flags: QueryFlags.DisableTracking,\n            cancellationToken: cancellationToken)", "GetKeyPredicate(id), flags: QueryFlags.DisableTracking,\n            cancellationToken: cancellationToken)",
+     "scoped CanDelete ignores the scope"),
+    ("V10-6", "L", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "        // Change detection scans every tracked entity: run it once for the batch, then compare each file.\n        _ = _unitOfWork.GetChanges();\n",
+     "", "batch loads stop forcing change detection (R6-4 on v10)"),
     ("E-6", "M", "Data.EF.Tests", "src/TabTabGo.Storage.Data.EF/StorageModelsBuilder.cs",
      "        modelBuilder.Property(f => f.CreatedBy).IsRequired();", "", "audit-column pin removed (equivalent on v8: Core 8 columns are already required; it only bites on Core 10)"),
 ]
@@ -181,7 +198,7 @@ def main() -> int:
         time.sleep(1.1)   # a fresh mtime, so the incremental build cannot reuse the previous mutant's output
         os.utime(path)
         try:
-            result = run(["dotnet", "test", f"tests/TabTabGo.Storage.{project}", "-c", "Release", "--no-restore"])
+            result = run(["dotnet", "test", "--project", f"tests/TabTabGo.Storage.{project}", "-c", "Release", "--no-restore"])
         finally:
             run(["git", "checkout", "--quiet", "--", rel])
             time.sleep(1.1)
@@ -190,7 +207,8 @@ def main() -> int:
         if re.search(r" error CS\d+", out):
             rows.append((rid, sev, what, "NO-BUILD", "mutant does not compile"))
             continue
-        failed = sorted(set(re.findall(r"^\s+Failed (\S+)", out, re.M)))
+        # VSTest prints "  Failed Name"; Microsoft.Testing.Platform (v10 and later) prints "failed Name (12ms)" at the line start.
+        failed = sorted(set(re.findall(r"^\s*[Ff]ailed (\S+)", out, re.M)))
         names = [f.split(".")[-1].split("(")[0] for f in failed]
         verdict = "KILLED" if failed else "SURVIVED"
         rows.append((rid, sev, what, verdict, f"{len(failed)} failing: " + ", ".join(sorted(set(names))[:4]) + (" ..." if len(set(names)) > 4 else "")))

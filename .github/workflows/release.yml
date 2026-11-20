@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to (re)build, for example v8.0.0'
+        description: 'Existing tag to (re)build, for example v10.0.0'
         required: true
         type: string
       dry-run:
@@ -181,13 +181,13 @@ jobs:
       - name: Build (warnings are errors)
         run: dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
 
-      - name: API compatibility against 6.0.8.4
+      - name: API compatibility against the published 8.0.0 libraries (v10 is additive-only)
         run: |
           dotnet tool restore
           python3 scripts/apicompat.py
 
       - name: Test (emulator tests included; Docker is available on this runner)
-        run: dotnet test TabTabGo.Storage.sln -c Release --no-build --collect:"XPlat Code Coverage" --results-directory coverage
+        run: dotnet test --solution TabTabGo.Storage.sln -c Release --no-build --coverlet --coverlet-output-format cobertura --results-directory coverage
 
       - name: Coverage gate
         run: python3 scripts/coverage-gate.py coverage
@@ -221,7 +221,7 @@ jobs:
             file="out/${id}.${VERSION}.nupkg"
             [ -f "$file" ] || { echo "::error::missing $file"; exit 1; }
             unzip -p "$file" "${id}.nuspec" | grep -q "<version>${VERSION}</version>" || { echo "::error::$file has the wrong version"; exit 1; }
-            unzip -l "$file" | grep -q "lib/net8.0/" || { echo "::error::$file has no net8.0 lib"; exit 1; }
+            unzip -l "$file" | grep -q "lib/net10.0/" || { echo "::error::$file has no net10.0 lib"; exit 1; }
             unzip -l "$file" | grep -q "README.md" || { echo "::error::$file has no README"; exit 1; }
           done
 
