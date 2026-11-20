@@ -41,7 +41,8 @@
     <PackageVersion Include="System.IO.Hashing" Version="11.0.0" />
     <PackageVersion Include="Moq" Version="4.21.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="11.0.0" />
-    <!-- Microsoft.EntityFrameworkCore.SqlServer 10.0.14 brings System.Security.Cryptography.Pkcs 9.0.11 (moderate + high advisories); pinned up here (test project only). -->
+    <!-- v10 needed this pin: Microsoft.EntityFrameworkCore.SqlServer 10.0.14 brought System.Security.Cryptography.Pkcs 9.0.11 (moderate + high
+         advisories). On v11 SqlServer 11.0.0 resolves 10.0.13 (no advisory) without it; the pin is kept at 11.0.0 as a floor (test project only). -->
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="11.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="11.0.0" />
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="11.0.0" />
