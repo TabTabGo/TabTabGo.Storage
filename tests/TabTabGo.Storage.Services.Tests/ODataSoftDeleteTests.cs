@@ -100,4 +100,26 @@ public class ODataSoftDeleteTests : IDisposable
         Assert.Equal([other.FileId], page.Items.Select(f => f.FileId));
         Assert.NotEqual(kept, other.FileId);
     }
+
+    // Sweep of the other inherited OData-based reads of Core 10 BaseReadService: none may show a soft-deleted file.
+    [Fact]
+    public async Task EveryInheritedODataRead_HidesSoftDeletedFiles()
+    {
+        var (kept, gone) = await SeedAsync();
+
+        var pageObject = await _h.Service.GetPageList((object)Options("?$top=50"));
+        var pageQuery = await _h.Service.GetPageListODataQuery(Options("?$top=50"));
+        var custom = await _h.Service.GetCustomViewModels(f => f, (object)Options("?$top=50"));
+        var table = await _h.Service.GetViewModelsDataTable(Options("?$top=50"), f => f,
+            columns: [new System.Data.DataColumn("FileId", typeof(long))],
+            getDataRow: (f, cols) => { var row = new System.Data.DataTable().NewRow(); return row; });
+        var named = await _h.Service.GetViewModels<File>((object)Options($"?$filter=FileId eq {gone}"), f => f);
+
+        Assert.DoesNotContain(pageObject.Items, f => f.FileId == gone);
+        Assert.Contains(pageObject.Items, f => f.FileId == kept);
+        Assert.DoesNotContain(pageQuery.Items, f => f.FileId == gone);
+        Assert.DoesNotContain(custom.Items, f => f.FileId == gone);
+        Assert.Empty(named.Items);
+        Assert.NotNull(table);
+    }
 }
