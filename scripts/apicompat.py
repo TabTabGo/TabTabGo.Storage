@@ -3,7 +3,7 @@
 
 v11 may only ADD API relative to v10 (additive-only rule); every break must be a deliberate row in EXACT below. Package
 validation compares the package, not the assembly, so this script takes the baseline package's lib assembly and runs
-Microsoft.DotNet.ApiCompat.Tool (pinned in .config/dotnet-tools.json) against the freshly built net10.0 assembly.
+Microsoft.DotNet.ApiCompat.Tool (pinned in .config/dotnet-tools.json) against the freshly built net11.0 assembly.
 
     python3 scripts/apicompat.py                            # CI: download 10.0.0 from nuget.org (SHA-256 pinned below)
     python3 scripts/apicompat.py --baseline-dir DIR         # local: use DIR/<package>.10.0.0.nupkg built from the v10 worktree
