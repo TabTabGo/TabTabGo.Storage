@@ -222,3 +222,67 @@ public class FileServiceExtraPropertiesLimitOverrideTests : IDisposable
         _h.Service.EnsureExtraPropertiesWithinLimits(entity);
     }
 }
+
+// The first attempt of a scoped update completes (its after-commit steps are queued, the new object is stored) and then the commit
+// fails; the unit of work retries the whole operation. The steps of the failed attempt must be dropped: PostUpdate and the removal of
+// the old object run once, for the attempt that committed.
+public class CommitFailsOnceUnitOfWork(DbContext context)
+    : UnitOfWork(context, Microsoft.Extensions.Logging.Abstractions.NullLogger<UnitOfWork>.Instance)
+{
+    private readonly DbContext _context = context;
+
+    public override async Task<T> ExecuteInTransactionAsync<T>(Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken = default)
+    {
+        var first = true;
+        try
+        {
+            return await base.ExecuteInTransactionAsync(async ct =>
+            {
+                var result = await operation(ct);
+                if (first)
+                {
+                    first = false;
+                    throw new TimeoutException("injected transient failure at commit");
+                }
+
+                return result;
+            }, cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            _context.ChangeTracker.Clear();
+            return await base.ExecuteInTransactionAsync(operation, cancellationToken);
+        }
+    }
+}
+
+public class FileServiceScopedCommitRetryTests : IDisposable
+{
+    private readonly SqliteStorageFixture _db = new();
+
+    public void Dispose() => _db.Dispose();
+
+    [Fact]
+    public async Task ARetryAfterAFailedCommit_RunsPostUpdateOnce_RemovesTheOldObjectOnce_AndKeepsTheRelocatedOne()
+    {
+        var storage = new RecordingProvider();
+        var service = new HookedFileService(new CommitFailsOnceUnitOfWork(_db.Context), storage,
+            new ImageService(Options.Create(new ImageServiceOptions())), Options.Create(new StorageServiceOptions()),
+            new FakeTimeProvider(new DateTimeOffset(2031, 5, 6, 7, 8, 9, TimeSpan.Zero)));
+        var file = await service.Upload(FileServiceHarness.Meta(), FileServiceHarness.Text());
+        service.Events.Clear();
+        storage.Calls.Clear();
+        var oldKey = $"Text/{file.FilePath}";
+        var client = new File { Title = "changed", ReferenceId = 7, ReferenceType = "Ticket", FileType = TabTabGo.Storage.Enums.FileType.PDF };
+
+        await service.UpdateChanges(file.FileId, client, f => f.ReferenceId == 7, CancellationToken.None);
+
+        Assert.Equal(1, service.Events.Count(e => e == "PostUpdate"));
+        Assert.Equal(1, storage.Calls.Count(c => c == $"Delete:Text/{file.FilePath}"));
+        Assert.Equal([$"PDF/{file.FilePath}"], storage.Keys());
+        Assert.DoesNotContain(oldKey, storage.Keys());
+        using var other = _db.NewContext();
+        Assert.Equal(TabTabGo.Storage.Enums.FileType.PDF, other.Set<File>().Single(f => f.FileId == file.FileId).FileType);
+    }
+}
