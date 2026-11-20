@@ -25,6 +25,21 @@ internal static class ActiveFilter
         return Expression.Lambda<Func<TFile, bool>>(Expression.AndAlso(body, active), parameter);
     }
 
+    /// <summary>Both conditions must hold; a null <paramref name="second"/> leaves <paramref name="first"/> as it is.</summary>
+    public static Expression<Func<TFile, bool>> AndAlso<TFile>(Expression<Func<TFile, bool>> first,
+        Expression<Func<TFile, bool>>? second)
+        where TFile : class, IFile
+    {
+        if (second is null)
+        {
+            return first;
+        }
+
+        var parameter = first.Parameters[0];
+        var body = new Replacer(second.Parameters[0], parameter).Visit(second.Body)!;
+        return Expression.Lambda<Func<TFile, bool>>(Expression.AndAlso(first.Body, body), parameter);
+    }
+
     private sealed class Replacer(ParameterExpression from, ParameterExpression to) : ExpressionVisitor
     {
         protected override Expression VisitParameter(ParameterExpression node) => node == from ? to : base.VisitParameter(node);
