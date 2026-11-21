@@ -230,6 +230,39 @@ public class BlobStorageProviderTests
         Assert.True(Guid.TryParse(Path.GetFileNameWithoutExtension(path), out _));
     }
 
+    [Fact]
+    public async Task Store_GeneratedName_NonAlphanumericExtension_Rejected()
+    {
+        var ex = await Assert.ThrowsAsync<StorageException>(() => Create().StoreAsync([1], ".png/x", "Image"));
+
+        Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+        Assert.Empty(_azure.Blobs);
+    }
+
+    [Fact]
+    public async Task Store_NoOverwrite_BlobAlreadyExists_ReportsObjectExists()
+    {
+        await Create().StoreAsync("a.txt", [1], "Text");
+        using var content = new MemoryStream([2]);
+
+        var ex = await Assert.ThrowsAsync<StorageException>(() =>
+            Create().StoreAsync(content, "a.txt", new StorageWriteOptions { Overwrite = false }, "Text"));
+
+        Assert.Equal("STORAGE_OBJECT_EXISTS", ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Store_NoOverwrite_Other409_IsGenericStorageFailure()
+    {
+        _azure.UploadFailure = new RequestFailedException(409, "deleting", "ContainerBeingDeleted", null);
+        using var content = new MemoryStream([2]);
+
+        var ex = await Assert.ThrowsAsync<StorageException>(() =>
+            Create().StoreAsync(content, "a.txt", new StorageWriteOptions { Overwrite = false }, "Text"));
+
+        Assert.NotEqual("STORAGE_OBJECT_EXISTS", ex.ErrorCode);
+    }
+
     // Z-8
     [Fact]
     public async Task GetPublicUrl_HonoursExpiryAndHeaders()

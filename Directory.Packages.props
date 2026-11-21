@@ -25,7 +25,7 @@
 
   <ItemGroup Label="Providers">
     <PackageVersion Include="AWSSDK.S3" Version="4.0.104.8" />
-    <!-- v10 takes the current 12.30.x (Azure.Core 1.5x needs Microsoft.Extensions.* 10.x, which net10.0 provides). -->
+    <!-- v11 uses the same 12.30.x as v10 (Azure.Core 1.5x needs Microsoft.Extensions.* 10.x or later, which net11.0 provides). -->
     <PackageVersion Include="Azure.Storage.Blobs" Version="12.30.1" />
     <PackageVersion Include="SkiaSharp" Version="4.154.0" />
     <PackageVersion Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.154.0" />

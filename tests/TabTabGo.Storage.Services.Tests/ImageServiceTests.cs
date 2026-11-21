@@ -247,6 +247,49 @@ public class ImageServiceTests : IDisposable
     }
 
     [Fact]
+    public void ResizeToPath_NotDecodable_LeavesNoFile()
+    {
+        var path = Path.Combine(_temp.Path, "bad.png");
+
+        var ex = Assert.Throws<ApiException>(() =>
+            _service.Resize(new MemoryStream([1, 2, 3, 4]), new Size(8, 8), path, "png", false, null));
+
+        Assert.Equal("IMAGE_NOT_DECODABLE", ex.ErrorCode);
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void ResizeToPath_NotDecodable_KeepsExistingFileIntact()
+    {
+        var path = Path.Combine(_temp.Path, "keep.png");
+        var original = TestImages.Png(10, 10);
+        File.WriteAllBytes(path, original);
+
+        Assert.Throws<ApiException>(() =>
+            _service.Resize(new MemoryStream([1, 2, 3, 4]), new Size(8, 8), path, "png", false, null));
+
+        Assert.Equal(original, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void ResizeToPath_TooLarge_KeepsExistingFileIntact()
+    {
+        var path = Path.Combine(_temp.Path, "keep2.png");
+        var original = TestImages.Png(10, 10);
+        File.WriteAllBytes(path, original);
+        var missing = Path.Combine(_temp.Path, "none.png");
+
+        var ex = Assert.Throws<ApiException>(() =>
+            _service.Resize(new MemoryStream(TestImages.PngDeclaring(30_000, 30_000)), new Size(8, 8), path, "png", false, null));
+        Assert.Throws<ApiException>(() =>
+            _service.Resize(new MemoryStream(TestImages.PngDeclaring(30_000, 30_000)), new Size(8, 8), missing, "png", false, null));
+
+        Assert.Equal("IMAGE_TOO_LARGE", ex.ErrorCode);
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.False(File.Exists(missing));
+    }
+
+    [Fact]
     public void ResizeFromPathToPath_Works()
     {
         var input = Path.Combine(_temp.Path, "in.png");

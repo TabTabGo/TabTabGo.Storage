@@ -63,6 +63,12 @@ public class BlobStorageProvider : StorageProvider
     {
         ArgumentNullException.ThrowIfNull(buffer);
         var ext = (extension ?? string.Empty).TrimStart('.');
+        if (ext.Length > 0 && !ext.All(char.IsAsciiLetterOrDigit))
+        {
+            throw new StorageException("The file extension is not valid.", ProviderName, "Store", container, null,
+                HttpStatusCode.BadRequest, code: "STORAGE_INVALID_PATH");
+        }
+
         var name = ext.Length == 0 ? Guid.NewGuid().ToString() : $"{Guid.NewGuid()}.{ext}";
         return await StoreAsync(name, buffer, container).ConfigureAwait(false);
     }
@@ -100,7 +106,7 @@ public class BlobStorageProvider : StorageProvider
             await blob.UploadAsync(content, upload, ct).ConfigureAwait(false);
             return relative;
         }
-        catch (RequestFailedException e) when (options is { Overwrite: false } && e.Status is 409 or 412)
+        catch (RequestFailedException e) when (options is { Overwrite: false } && (e.Status == 412 || e is { Status: 409, ErrorCode: "BlobAlreadyExists" }))
         {
             throw new StorageException("Object already exists.", ProviderName, "Store", container, relative,
                 HttpStatusCode.Conflict, e, "STORAGE_OBJECT_EXISTS");
