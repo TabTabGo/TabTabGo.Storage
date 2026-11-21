@@ -35,6 +35,8 @@ public sealed class FakeAzure
 
     public Func<Task>? OnCreateContainer { get; set; }
 
+    public Exception? UploadFailure { get; set; }
+
     public Stream? TrackedDownload { get; set; }
 
     public bool CanSas { get; set; } = true;
@@ -81,6 +83,11 @@ public sealed class FakeAzure
             .Returns<Stream, BlobUploadOptions, CancellationToken>(async (content, options, ct) =>
             {
                 ct.ThrowIfCancellationRequested();
+                if (UploadFailure is not null)
+                {
+                    throw UploadFailure;
+                }
+
                 if (options?.Conditions?.IfNoneMatch == ETag.All && Blobs.ContainsKey(key))
                 {
                     throw new RequestFailedException(409, "exists", "BlobAlreadyExists", null);

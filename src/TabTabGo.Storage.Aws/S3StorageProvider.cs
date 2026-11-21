@@ -87,6 +87,12 @@ public class S3StorageProvider : StorageProvider, IDisposable
     {
         ArgumentNullException.ThrowIfNull(buffer);
         var ext = (extension ?? string.Empty).TrimStart('.');
+        if (ext.Length > 0 && !ext.All(char.IsAsciiLetterOrDigit))
+        {
+            throw new StorageException("The file extension is not valid.", ProviderName, "Store", container, null,
+                HttpStatusCode.BadRequest, code: "STORAGE_INVALID_PATH");
+        }
+
         var name = ext.Length == 0 ? Guid.NewGuid().ToString() : $"{Guid.NewGuid()}.{ext}";
         return StoreAsync(name, buffer, container);
     }

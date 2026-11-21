@@ -1,4 +1,5 @@
-﻿using System.Linq.Expressions;
+﻿using System.Globalization;
+using System.Linq.Expressions;
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -301,7 +302,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         var prepared = Prepare(content);
         var oldPath = file.FilePath;
         var oldType = file.FileType;
-        var previous = new StoredContent(file.FilePath, file.FileSize ?? 0, file.FileExtension, file.OriginalFileName,
+        var previous = new StoredContent(file.FilePath, file.FileSize, file.FileExtension, file.OriginalFileName,
             file.OriginalMediaType);
         var previousUpdated = file.UpdatedDate;
 
@@ -802,7 +803,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     private sealed record StoredObject(string Container, string Path);
 
     private sealed record StoredContent(
-        string FilePath, long Size, string Extension, string OriginalFileName, string OriginalMediaType);
+        string FilePath, long? Size, string Extension, string OriginalFileName, string OriginalMediaType);
 
     private sealed record PreparedUpload(string FileName, string Extension);
 
@@ -943,7 +944,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         List<StoredObject> stored, CancellationToken ct)
     {
         var container = type.ToString();
-        var path = $"{_timeProvider.GetUtcNow():yyyyMMdd}/{Guid.NewGuid():N}{prepared.Extension}";
+        var path = $"{_timeProvider.GetUtcNow().ToString("yyyyMMdd", CultureInfo.InvariantCulture)}/{Guid.NewGuid():N}{prepared.Extension}";
         var writeOptions = new StorageWriteOptions { ContentType = ContentTypeMap.FromExtension(prepared.Extension) };
 
         await using var source = content.OpenReadStream();

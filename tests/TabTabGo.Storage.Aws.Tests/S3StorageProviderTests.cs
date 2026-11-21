@@ -213,6 +213,15 @@ public class S3StorageProviderTests
         Assert.True(Guid.TryParse(Path.GetFileNameWithoutExtension(path), out _));
     }
 
+    [Fact]
+    public async Task Store_GeneratedName_NonAlphanumericExtension_Rejected()
+    {
+        var ex = await Assert.ThrowsAsync<StorageException>(() => Create().StoreAsync([1], ".png/x", "Image"));
+
+        Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+        Assert.Empty(_s3.Objects);
+    }
+
     // The existence check is a single conditional PUT, not a HEAD followed by a PUT (which races).
     [Fact]
     public async Task Store_OverwriteFalse_UsesIfNoneMatch_AndNoHeadRequest()

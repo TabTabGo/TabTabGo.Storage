@@ -788,6 +788,38 @@ public class FileServiceReplaceAndUpdateTests : IDisposable
     }
 
     [Fact]
+    public async Task Replace_SaveFails_LegacyNullFileSize_StaysNull()
+    {
+        var file = await _h.UploadTextAsync();
+        file.FileSize = null;
+        await _h.Db.Context.SaveChangesAsync();
+        _h.Uow.FailSave = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _h.Service.Replace(file.FileId, FileServiceHarness.Text("n.txt", "new")));
+
+        Assert.Null(file.FileSize);
+    }
+
+    [Theory]
+    [InlineData("ar-SA")]
+    [InlineData("th-TH")]
+    public async Task Upload_DateFolder_IsCultureInvariant(string culture)
+    {
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
+        try
+        {
+            var file = await _h.UploadTextAsync();
+
+            Assert.StartsWith("20310506/", file.FilePath);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    [Fact]
     public async Task Replace_OldDeleteFails_IsLoggedNotThrown()
     {
         var file = await _h.UploadTextAsync();

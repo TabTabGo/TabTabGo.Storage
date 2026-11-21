@@ -85,6 +85,12 @@ Every provider passes the same contract suite:
 - **Content type comes from the extension**, never from the client (`ContentTypeMap`). Script-capable types are
   never mapped to their native type, and signed URLs only override the response type to the type of the object's
   own extension (the caller's string is never echoed).
+- **Image resize to a path is all-or-nothing.** `IImageService.Resize(..., string outputPath, ...)` encodes in memory and
+  writes the file only on success: a corrupt or oversized image leaves no new file and never truncates an existing one.
+- **Generated names validate the extension.** The `StoreAsync(byte[], extension, container)` overload of every provider
+  (disk, S3, Azure) accepts `[A-Za-z0-9]` extensions only and throws `STORAGE_INVALID_PATH` otherwise.
+- **Azure `Overwrite = false`** reports `STORAGE_OBJECT_EXISTS` only for `BlobAlreadyExists` / a failed `If-None-Match`;
+  other 409s (container being deleted, lease conflicts) surface as the generic storage failure.
 - **Updates cannot move files.** `FilePath`, `FileSize`, `FileExtension`, `OriginalFileName` and
   `OriginalMediaType` change only through `Upload` / `Replace`.
 - **Signed URLs are served by the storage provider, without our headers** (no `X-Content-Type-Options: nosniff`). They
