@@ -99,6 +99,12 @@ Every provider passes the same contract suite:
 - **Content type comes from the extension**, never from the client (`ContentTypeMap`). Script-capable types are
   never mapped to their native type, and signed URLs only override the response type to the type of the object's
   own extension (the caller's string is never echoed).
+- **Image resize to a path is all-or-nothing.** `IImageService.Resize(..., string outputPath, ...)` encodes in memory and
+  writes the file only on success: a corrupt or oversized image leaves no new file and never truncates an existing one.
+- **Generated names validate the extension.** The `StoreAsync(byte[], extension, container)` overload of every provider
+  (disk, S3, Azure) accepts `[A-Za-z0-9]` extensions only and throws `STORAGE_INVALID_PATH` otherwise.
+- **Azure `Overwrite = false`** reports `STORAGE_OBJECT_EXISTS` only for `BlobAlreadyExists` / a failed `If-None-Match`;
+  other 409s (container being deleted, lease conflicts) surface as the generic storage failure.
 - **Updates cannot move files.** `FilePath`, `FileSize`, `FileExtension`, `OriginalFileName` and
   `OriginalMediaType` change only through `Upload` / `Replace`.
 - **Signed URLs are served by the storage provider, without our headers** (no `X-Content-Type-Options: nosniff`). They
@@ -119,7 +125,7 @@ v10 only adds API relative to 8.0.0 (`python3 scripts/apicompat.py` proves it). 
 | `StorageDbProvider(null, logger)` throws `ArgumentNullException` (Core 10 refuses a null context; Core 8 accepted it and saved nothing) | pass the context |
 | Core 10 scoped overloads `Delete(id, scope)`, `Delete(ids, scope)`, `CanDelete(id/ids, scope)`, `UpdateChanges(id, entity, scope)` run through `FileService` (same hooks, same allow-list, restore of storage-owned state, soft delete): a file outside the scope or already soft-deleted is a 404; `UpdateChanges` with a scope runs in a transaction and is rolled back (404) when the change leaves the scope; the old objects are removed and `PostUpdate` runs after the commit | use them for tenant scoping; do not override `UpdateChanges(id, entity, ct)` expecting the scoped overload to call it. Scoped `Delete(ids, scope)` is **all-or-404**: every id must name an enabled file inside the scope, otherwise nothing is deleted. The unscoped `Delete(ids)` is more lenient (as in 8.x): it skips ids that do not exist or are already soft-deleted |
 | The scoped `UpdateChanges` takes one copy of the client entity before its transaction and reuses it on every retry of a retrying execution strategy | none |
-| **Host transactions.** The scoped `UpdateChanges` removes the old objects (after a file type change) and runs `PostUpdate` after its own unit of work returns. Inside a transaction that **you** opened, that is before you commit. A scoped update that changes the file type is therefore refused with 409 `RELOCATION_IN_HOST_TRANSACTION`; a scoped update that does not change it works, but `PostUpdate` still runs before your commit, so keep its side effects idempotent or run the update outside your transaction | spec backlog BL-4 |
+| **Host transactions.** The scoped `UpdateChanges` removes the old objects (after a file type change) and runs `PostUpdate` after its own unit of work returns. Inside a transaction that **you** opened, that is before you commit. A scoped update that changes the file type is therefore refused with 409 `RELOCATION_IN_HOST_TRANSACTION`; a scoped update that does not change it works, but `PostUpdate` still runs before your commit, so keep its side effects idempotent or run the update outside your transaction. The pre-save scope check also runs in memory there: a scope the in-memory evaluation cannot handle (for example `EF.Functions.Like`) is refused with 404 instead of being let through, so use plain comparisons in a scope you pass inside a host transaction | spec backlog BL-4 |
 | `EnsureExtraPropertiesWithinLimits(file)` (public, Core 10) applies this service's `MaxExtraPropertyKeys` / `MaxExtraPropertiesBytes` (400 `EXTRA_PROPERTIES_TOO_LARGE`) | none |
 | `PreferServiceKeyPredicate` is `true`: Core's `CountByKeys` and `GetDeleteValidationAsync` hide soft-deleted files | none |
 | `GetChanges()` of the unit of work returns `IReadOnlyList<EntityChange>` (Core 10) | custom `IUnitOfWork` wrappers must follow |

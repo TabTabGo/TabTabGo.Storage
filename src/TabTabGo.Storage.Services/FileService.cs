@@ -1,4 +1,5 @@
-﻿using System.Linq.Expressions;
+﻿using System.Globalization;
+using System.Linq.Expressions;
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -305,7 +306,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         var prepared = Prepare(content);
         var oldPath = file.FilePath;
         var oldType = file.FileType;
-        var previous = new StoredContent(file.FilePath, file.FileSize ?? 0, file.FileExtension, file.OriginalFileName,
+        var previous = new StoredContent(file.FilePath, file.FileSize, file.FileExtension, file.OriginalFileName,
             file.OriginalMediaType);
         var previousUpdated = file.UpdatedDate;
 
@@ -968,7 +969,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     private sealed record StoredObject(string Container, string Path);
 
     private sealed record StoredContent(
-        string FilePath, long Size, string Extension, string OriginalFileName, string OriginalMediaType);
+        string FilePath, long? Size, string Extension, string OriginalFileName, string OriginalMediaType);
 
     private sealed record PreparedUpload(string FileName, string Extension);
 
@@ -981,8 +982,9 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         }
     }
 
-    // The merged entity checked against the scope before anything is saved. A scope the in-memory evaluation cannot handle (database
-    // functions, navigations that are not loaded) is not an answer: the database check after the save remains the authority.
+    // The merged entity checked against the scope before anything is saved, used only when the host owns the transaction. A scope the
+    // in-memory evaluation cannot handle (database functions, navigations that are not loaded) is not an answer: inside a host
+    // transaction nothing can be rolled back by us, so it fails closed (the update is refused) instead of being let through.
     private static bool IsInScopeInMemory(TFile merged, Expression<Func<TFile, bool>> scope)
     {
         try
@@ -991,7 +993,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         }
         catch (Exception ex) when (ex is InvalidOperationException or NullReferenceException or NotSupportedException)
         {
-            return true;
+            return false;
         }
     }
 
@@ -1138,7 +1140,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         List<StoredObject> stored, CancellationToken ct)
     {
         var container = type.ToString();
-        var path = $"{_timeProvider.GetUtcNow():yyyyMMdd}/{Guid.NewGuid():N}{prepared.Extension}";
+        var path = $"{_timeProvider.GetUtcNow().ToString("yyyyMMdd", CultureInfo.InvariantCulture)}/{Guid.NewGuid():N}{prepared.Extension}";
         var writeOptions = new StorageWriteOptions { ContentType = ContentTypeMap.FromExtension(prepared.Extension) };
 
         await using var source = content.OpenReadStream();

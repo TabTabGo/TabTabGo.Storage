@@ -188,6 +188,25 @@ public class FileServiceScopedHostTransactionTests : IDisposable
     }
 
     [Fact]
+    public async Task ScopedUpdate_WithAScopeThatCannotBeEvaluatedInMemory_InsideAHostTransaction_IsRefused_AndNothingIsSaved()
+    {
+        var (service, uow, _) = Build();
+        var file = await service.Upload(FileServiceHarness.Meta(), FileServiceHarness.Text());
+        service.Events.Clear();
+        uow.InHostTransaction = true;
+        var client = new File { Title = "changed", ReferenceId = 7, ReferenceType = "Ticket", FileType = TabTabGo.Storage.Enums.FileType.Text };
+
+        // EF.Functions.Like is translated by the database and throws when compiled and run in memory.
+        var ex = await Assert.ThrowsAsync<TabTabGo.Core.Exceptions.ApiException>(() =>
+            service.UpdateChanges(file.FileId, client, f => EF.Functions.Like(f.ReferenceType!, "Tick%"), CancellationToken.None));
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, ex.HttpStatusCode);
+        using var other = _db.NewContext();
+        Assert.NotEqual("changed", other.Set<File>().Single(f => f.FileId == file.FileId).Title);
+        Assert.DoesNotContain("PostUpdate", service.Events);
+    }
+
+    [Fact]
     public async Task ScopedUpdateWithoutRelocation_InsideAHostTransaction_Works()
     {
         var (service, uow, _) = Build();
