@@ -30,3 +30,7 @@ that lead out of the root** throw a 400 `StorageException`; a root that is itsel
 place (readers never see a partial file); `Overwrite = false` claims the name with an exclusive create (exactly one concurrent
 writer wins, a failed write leaves no partial file); generated names are unique under concurrency; `OpenReadAsync` returns a
 `FileStream`; deleting a missing file is a no-op. The provider is a thread-safe singleton and uses `TimeProvider` (UTC).
+
+## Requirements
+
+`PathService` needs an `IHostEnvironment` (`Microsoft.Extensions.Hosting.Abstractions`, part of the platform on net11.0) to resolve a relative `RootPath` against the content root. The Generic Host / `WebApplication` registers one; a bare `ServiceCollection` must register its own (`services.AddSingleton<IHostEnvironment>(...)`).

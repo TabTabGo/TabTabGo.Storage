@@ -106,10 +106,17 @@ public class BlobStorageProvider : StorageProvider
             {
                 await UploadOnceAsync(containerClient, blob, content, upload, ct).ConfigureAwait(false);
             }
-            catch (RequestFailedException e) when (e.ErrorCode == "ContainerNotFound" && content.CanSeek)
+            catch (RequestFailedException e) when (e.ErrorCode == "ContainerNotFound")
             {
-                // The container was deleted after this process created it: forget the cached creation, recreate, retry once.
+                // The container was deleted after this process created it: always forget the cached creation, so the next write
+                // recreates it even when this one cannot be replayed.
                 _createdContainers.TryRemove(containerClient.Name, out _);
+                if (!content.CanSeek)
+                {
+                    // A non-seekable body (the service's counting stream) is partly consumed and cannot be replayed.
+                    throw;
+                }
+
                 content.Position = start;
                 await UploadOnceAsync(containerClient, blob, content, upload, ct).ConfigureAwait(false);
             }
@@ -264,9 +271,9 @@ public class BlobStorageProvider : StorageProvider
             }
 
             // Token credentials sign with a user-delegation key (no account key needed).
-            // Azure rejects a delegation key valid for more than 7 days: start it now (not in the past) and keep a margin, and never
-            // let the SAS outlive the key.
-            var keyStart = DateTimeOffset.UtcNow;
+            // Azure rejects a delegation key valid for more than 7 days from its start, and a start in the future: start it a few
+            // minutes back (clock skew), cap the window with a margin, and never let the SAS outlive the key.
+            var keyStart = DateTimeOffset.UtcNow - DelegationKeyClockSkew;
             var keyExpiry = expiresOn <= keyStart.Add(MaxDelegationKeyLifetime) ? expiresOn : keyStart.Add(MaxDelegationKeyLifetime);
             builder.ExpiresOn = keyExpiry;
             var key = await _serviceClient.GetUserDelegationKeyAsync(keyStart, keyExpiry, ct).ConfigureAwait(false);
@@ -278,7 +285,9 @@ public class BlobStorageProvider : StorageProvider
         }
     }
 
-    // Azure's limit is 7 days; one minute of margin absorbs clock differences.
+    private static readonly TimeSpan DelegationKeyClockSkew = TimeSpan.FromMinutes(5);
+
+    // Azure's limit is 7 days from the key's start; one minute of margin.
     private static readonly TimeSpan MaxDelegationKeyLifetime = TimeSpan.FromDays(7) - TimeSpan.FromMinutes(1);
 
     private static bool IsUpstream(Exception e) =>

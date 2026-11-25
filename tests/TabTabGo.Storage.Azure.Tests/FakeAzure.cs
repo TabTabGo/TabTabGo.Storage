@@ -39,6 +39,9 @@ public sealed class FakeAzure
 
     public bool UploadFailureOnce { get; set; }
 
+    /// <summary>Bytes the fake reads from the body before it fails (a real upload consumes part of the stream first).</summary>
+    public int UploadFailureReadBytes { get; set; }
+
     public Stream? TrackedDownload { get; set; }
 
     public bool CanSas { get; set; } = true;
@@ -88,6 +91,12 @@ public sealed class FakeAzure
                 if (UploadFailure is not null)
                 {
                     var failure = UploadFailure;
+                    if (UploadFailureReadBytes > 0)
+                    {
+                        var consumed = new byte[UploadFailureReadBytes];
+                        _ = await content.ReadAsync(consumed, ct);
+                    }
+
                     if (UploadFailureOnce)
                     {
                         UploadFailure = null;

@@ -111,7 +111,7 @@ Every provider passes the same contract suite:
   therefore only ever carry the content type of the object's own extension, `text/plain` is never inline, and active
   content is always an attachment.
 - **Credentials:** use an IAM role (S3) or managed identity (Azure). Presigned URLs and SAS live between 1 minute
-  and 7 days.
+  and 7 days; a SAS signed with a token credential (user-delegation key) is capped slightly below that, at 6 days 23 hours 54 minutes, because Azure limits the key to 7 days from its start and the start is placed 5 minutes back for clock skew.
 - Thumbnail generation rejects images over `ImageServiceOptions.MaxPixels` (decompression-bomb guard).
 - **S3 uploads of non-seekable streams are buffered in memory** (the SDK needs the length), so keep `StorageServiceOptions.MaxFileSizeBytes` (default 50 MiB) bounded: raising it or removing it raises per-upload memory with it.
 - **`StoragePath` accepts segments with a trailing dot or space** (for example `a./b`). They alias to `a/b` on Windows with the file-system provider only; S3 and Azure keep them distinct. Do not rely on such names being distinct on Windows.
@@ -164,6 +164,8 @@ v10 only adds API relative to 8.0.0 (`python3 scripts/apicompat.py` proves it). 
 | `ImageSizeExtensions` is in `TabTabGo.Storage.Services` | add the `using` |
 | `FileNotFoundException` / `TTGException` become `ApiException` (404/400) | update exception filters |
 | `GetFile` / `GetImage` throw `ApiException` 404 `FILE_NOT_FOUND` (not `FileNotFoundException`) when the row or its object is missing, and `FileResult.ContentType` now comes from the **stored extension**, never from the media type the client sent (spec SB16, X-2) | catch `ApiException` and read `FileResult.ContentType` instead of the original upload's media type |
+| A whole-entity `Update` keeps the stored value when the incoming `ReferenceId` / `Duration` (like `Title`, `Comment`, `ReferenceType`) is null (spec SB45); a consumer entity with a non-nullable `ReferenceId` always copies it | clear a value with a JSON patch (`Update(id, JsonObject)`) |
+| The list filter converts `ReferenceType` / `ReferenceId` to the consumer entity's member type (string or enum, `long` or `long?`); an unknown enum name is 400 `FILTER_NOT_SUPPORTED` instead of a 500 (spec SB44) | none; query with a defined enum name |
 | The obsolete `GetPublicPath(..., expiryDays)` **ignores `expiryDays`** on S3 and Azure and uses the provider default lifetime (S3 `ExpirationMinutes`, default 60; Azure `DefaultSasExpiry`, default 1 hour) (spec SB25) | call `GetPublicUrlAsync` with `PublicUrlOptions.ExpiresIn` when the lifetime matters |
 | `FileService.Update(long, JObject)` (Newtonsoft) became `Update(long, JsonObject)` (System.Text.Json), Core 8 API | switch the argument type |
 | `IPathService.PathSettings { get; }` is a new abstract member | custom `IPathService` implementers must add it |
