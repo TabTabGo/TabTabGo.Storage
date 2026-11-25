@@ -264,8 +264,12 @@ public class BlobStorageProvider : StorageProvider
             }
 
             // Token credentials sign with a user-delegation key (no account key needed).
-            var key = await _serviceClient.GetUserDelegationKeyAsync(DateTimeOffset.UtcNow.AddMinutes(-5), expiresOn, ct)
-                .ConfigureAwait(false);
+            // Azure rejects a delegation key valid for more than 7 days: start it now (not in the past) and keep a margin, and never
+            // let the SAS outlive the key.
+            var keyStart = DateTimeOffset.UtcNow;
+            var keyExpiry = expiresOn <= keyStart.Add(MaxDelegationKeyLifetime) ? expiresOn : keyStart.Add(MaxDelegationKeyLifetime);
+            builder.ExpiresOn = keyExpiry;
+            var key = await _serviceClient.GetUserDelegationKeyAsync(keyStart, keyExpiry, ct).ConfigureAwait(false);
             return blob.GenerateUserDelegationSasUri(builder, key.Value);
         }
         catch (Exception e) when (IsUpstream(e))
@@ -273,6 +277,9 @@ public class BlobStorageProvider : StorageProvider
             throw Failure("GetPublicUrl", container, relative, e);
         }
     }
+
+    // Azure's limit is 7 days; one minute of margin absorbs clock differences.
+    private static readonly TimeSpan MaxDelegationKeyLifetime = TimeSpan.FromDays(7) - TimeSpan.FromMinutes(1);
 
     private static bool IsUpstream(Exception e) =>
         e is RequestFailedException or HttpRequestException or IOException or TimeoutException or AggregateException;
