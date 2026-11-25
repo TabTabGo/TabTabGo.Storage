@@ -146,6 +146,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     public async Task<FileResult> GetImage(long id, ImageSize size = ImageSize.Default,
         CancellationToken cancellationToken = default)
     {
+        // An undefined size is a 400 before any lookup or storage probe (it would otherwise be probed as a thumbnail path first).
+        _ = size.GetSize();
         var file = await FindAsync(id, cancellationToken).ConfigureAwait(false) ?? throw NotFound(id);
         if (file.FileType != FileType.Image)
         {

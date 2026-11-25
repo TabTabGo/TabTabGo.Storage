@@ -89,8 +89,6 @@ public class BlobStorageProvider : StorageProvider
         var (containerClient, blob, relative) = GetBlob("Store", container, filePath);
         try
         {
-            await EnsureContainerAsync(containerClient).ConfigureAwait(false);
-            _logger.LogTrace("Uploading blob {BlobName} to container {Container}", blob.Name, containerClient.Name);
             var upload = new BlobUploadOptions
             {
                 HttpHeaders = new BlobHttpHeaders
@@ -103,7 +101,19 @@ public class BlobStorageProvider : StorageProvider
                 upload.Conditions = new BlobRequestConditions { IfNoneMatch = ETag.All };
             }
 
-            await blob.UploadAsync(content, upload, ct).ConfigureAwait(false);
+            var start = content.CanSeek ? content.Position : 0;
+            try
+            {
+                await UploadOnceAsync(containerClient, blob, content, upload, ct).ConfigureAwait(false);
+            }
+            catch (RequestFailedException e) when (e.ErrorCode == "ContainerNotFound" && content.CanSeek)
+            {
+                // The container was deleted after this process created it: forget the cached creation, recreate, retry once.
+                _createdContainers.TryRemove(containerClient.Name, out _);
+                content.Position = start;
+                await UploadOnceAsync(containerClient, blob, content, upload, ct).ConfigureAwait(false);
+            }
+
             return relative;
         }
         catch (RequestFailedException e) when (options is { Overwrite: false } && (e.Status == 412 || e is { Status: 409, ErrorCode: "BlobAlreadyExists" }))
@@ -288,6 +298,14 @@ public class BlobStorageProvider : StorageProvider
         var containerClient = _serviceClient.GetBlobContainerClient(containerName);
         var blobName = _options.LowercaseBlobNames ? relative.ToLowerInvariant() : relative;
         return (containerClient, containerClient.GetBlobClient(blobName), relative);
+    }
+
+    private async Task UploadOnceAsync(BlobContainerClient containerClient, BlobClient blob, Stream content,
+        BlobUploadOptions upload, CancellationToken ct)
+    {
+        await EnsureContainerAsync(containerClient).ConfigureAwait(false);
+        _logger.LogTrace("Uploading blob {BlobName} to container {Container}", blob.Name, containerClient.Name);
+        await blob.UploadAsync(content, upload, ct).ConfigureAwait(false);
     }
 
     private Task EnsureContainerAsync(BlobContainerClient containerClient)

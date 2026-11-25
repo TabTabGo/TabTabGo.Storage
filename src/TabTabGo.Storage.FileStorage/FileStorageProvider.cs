@@ -125,7 +125,8 @@ public class FileStorageProvider : StorageProvider
                 return Task.FromResult<Stream?>(null);
             }
 
-            Stream stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read, 4096,
+            Stream stream = new FileStream(full, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete, 4096,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
             return Task.FromResult<Stream?>(stream);
         }

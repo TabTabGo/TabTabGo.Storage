@@ -758,6 +758,19 @@ public class FileServiceReplaceAndUpdateTests : IDisposable
     }
 
     [Fact]
+    public async Task GetImage_UndefinedSize_400_BeforeAnyStorageAccess()
+    {
+        var file = await _h.UploadImageAsync();
+        _h.Storage.Tokens.Clear();
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _h.Service.GetImage(file.FileId, (ImageSize)99));
+
+        Assert.Equal(HttpStatusCode.BadRequest, ex.HttpStatusCode);
+        Assert.Equal("IMAGE_SIZE_NOT_SUPPORTED", ex.ErrorCode);
+        Assert.Empty(_h.Storage.Tokens);
+    }
+
+    [Fact]
     public async Task Replace_Missing_404() =>
         Assert.Equal(HttpStatusCode.NotFound,
             (await Assert.ThrowsAsync<ApiException>(() => _h.Service.Replace(404, FileServiceHarness.Text()))).HttpStatusCode);

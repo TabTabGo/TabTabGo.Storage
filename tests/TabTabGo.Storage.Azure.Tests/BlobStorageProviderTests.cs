@@ -252,6 +252,32 @@ public class BlobStorageProviderTests
     }
 
     [Fact]
+    public async Task Store_ContainerDeletedAfterCreation_RecreatesAndRetriesOnce()
+    {
+        var provider = Create();
+        await provider.StoreAsync("a.txt", [1], "Text");
+        _azure.UploadFailure = new RequestFailedException(404, "gone", "ContainerNotFound", null);
+        _azure.UploadFailureOnce = true;
+
+        await provider.StoreAsync("b.txt", [2], "Text");
+
+        Assert.Equal(2, _azure.CreateCalls);
+        Assert.True(_azure.Blobs.ContainsKey("text/b.txt"));
+    }
+
+    [Fact]
+    public async Task Store_ContainerStaysMissing_RetriesOnlyOnce_ThenFails()
+    {
+        var provider = Create();
+        await provider.StoreAsync("a.txt", [1], "Text");
+        _azure.UploadFailure = new RequestFailedException(404, "gone", "ContainerNotFound", null);
+
+        await Assert.ThrowsAsync<StorageException>(() => provider.StoreAsync("b.txt", [2], "Text"));
+
+        Assert.Equal(2, _azure.CreateCalls);
+    }
+
+    [Fact]
     public async Task Store_NoOverwrite_Other409_IsGenericStorageFailure()
     {
         _azure.UploadFailure = new RequestFailedException(409, "deleting", "ContainerBeingDeleted", null);
