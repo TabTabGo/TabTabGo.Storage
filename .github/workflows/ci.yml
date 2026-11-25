@@ -50,7 +50,7 @@ jobs:
       - name: Build (warnings are errors)
         run: dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
 
-      - name: API compatibility against the published 8.0.0 libraries (v10 is additive-only; the SHA-256 pins are recorded after 8.0.0 is published)
+      - name: Assembly API compatibility (scripts/apicompat.py) against the 8.0.0 libraries; the package-validation baseline in src/Directory.Build.props stays 6.0.8.4 - (v10 is additive-only; the SHA-256 pins are recorded after 8.0.0 is published)
         if: matrix.os == 'ubuntu-latest'
         run: |
           dotnet tool restore

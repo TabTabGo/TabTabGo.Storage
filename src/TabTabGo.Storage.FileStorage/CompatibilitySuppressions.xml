@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <!-- https://learn.microsoft.com/en-us/dotnet/fundamentals/package-validation/diagnostic-ids -->
-<!-- Spec 6.4 SB1: the 6.0.8.4 target framework (netstandard2.0 / net6.0) is intentionally dropped; v8 targets net8.0 only.
+<!-- Spec 6.4 SB1: the 6.0.8.4 package-validation baseline (netstandard2.0 / net6.0) has no counterpart on this line; v10 targets net10.0 only.
      This is the only suppression. The source-level breaks SB3-SB22 are listed in README.md (Upgrading from 6.x). -->
 <Suppressions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <Suppression>

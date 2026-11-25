@@ -57,8 +57,7 @@ public class PathService : IPathService
         foreach (var candidate in candidates)
         {
             var full = Path.GetFullPath(ResolvePath(candidate));
-            var underWebRoot = !string.IsNullOrEmpty(webRoot) &&
-                               full.StartsWith(Path.GetFullPath(webRoot), StringComparison.OrdinalIgnoreCase);
+            var underWebRoot = !string.IsNullOrEmpty(webRoot) && IsSameOrUnder(full, Path.GetFullPath(webRoot));
             var underWwwroot = full.Split('/', '\\')
                 .Any(s => string.Equals(s, "wwwroot", StringComparison.OrdinalIgnoreCase));
             if (underWebRoot || underWwwroot)
@@ -69,5 +68,14 @@ public class PathService : IPathService
                 return;
             }
         }
+    }
+
+    // `/app/wwwroot-private` is not under `/app/wwwroot`: compare whole path segments, not a string prefix.
+    private static bool IsSameOrUnder(string path, string root)
+    {
+        var trimmed = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return path.Equals(trimmed, StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWith(trimmed + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWith(trimmed + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 }

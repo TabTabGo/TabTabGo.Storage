@@ -267,6 +267,20 @@ public class FileStorageProviderTests : IDisposable
         Assert.IsType<FileStream>(stream);
     }
 
+    // A reader streaming an object must not make a concurrent overwrite or delete fail (a sharing violation on Windows).
+    [Fact]
+    public async Task OpenRead_WhileTheObjectIsOverwrittenAndDeleted_DoesNotBlockTheWriter()
+    {
+        await _h.Provider.StoreAsync("live.bin", new byte[4096], "Image");
+        await using var stream = await _h.Provider.OpenReadAsync("live.bin", "Image");
+        Assert.NotNull(stream);
+
+        await _h.Provider.StoreAsync("live.bin", Bytes("replaced"), "Image");
+        await _h.Provider.DeleteAsync("live.bin", "Image");
+
+        Assert.False(await _h.Provider.ExistsAsync("live.bin", "Image"));
+    }
+
     [Fact]
     public async Task Exists_OnDirectory_IsFalse_AndRetrieveIsNull()
     {

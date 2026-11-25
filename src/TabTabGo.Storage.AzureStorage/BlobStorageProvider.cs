@@ -89,8 +89,6 @@ public class BlobStorageProvider : StorageProvider
         var (containerClient, blob, relative) = GetBlob("Store", container, filePath);
         try
         {
-            await EnsureContainerAsync(containerClient).ConfigureAwait(false);
-            _logger.LogTrace("Uploading blob {BlobName} to container {Container}", blob.Name, containerClient.Name);
             var upload = new BlobUploadOptions
             {
                 HttpHeaders = new BlobHttpHeaders
@@ -103,7 +101,19 @@ public class BlobStorageProvider : StorageProvider
                 upload.Conditions = new BlobRequestConditions { IfNoneMatch = ETag.All };
             }
 
-            await blob.UploadAsync(content, upload, ct).ConfigureAwait(false);
+            var start = content.CanSeek ? content.Position : 0;
+            try
+            {
+                await UploadOnceAsync(containerClient, blob, content, upload, ct).ConfigureAwait(false);
+            }
+            catch (RequestFailedException e) when (e.ErrorCode == "ContainerNotFound" && content.CanSeek)
+            {
+                // The container was deleted after this process created it: forget the cached creation, recreate, retry once.
+                _createdContainers.TryRemove(containerClient.Name, out _);
+                content.Position = start;
+                await UploadOnceAsync(containerClient, blob, content, upload, ct).ConfigureAwait(false);
+            }
+
             return relative;
         }
         catch (RequestFailedException e) when (options is { Overwrite: false } && (e.Status == 412 || e is { Status: 409, ErrorCode: "BlobAlreadyExists" }))
@@ -254,8 +264,12 @@ public class BlobStorageProvider : StorageProvider
             }
 
             // Token credentials sign with a user-delegation key (no account key needed).
-            var key = await _serviceClient.GetUserDelegationKeyAsync(DateTimeOffset.UtcNow.AddMinutes(-5), expiresOn, ct)
-                .ConfigureAwait(false);
+            // Azure rejects a delegation key valid for more than 7 days: start it now (not in the past) and keep a margin, and never
+            // let the SAS outlive the key.
+            var keyStart = DateTimeOffset.UtcNow;
+            var keyExpiry = expiresOn <= keyStart.Add(MaxDelegationKeyLifetime) ? expiresOn : keyStart.Add(MaxDelegationKeyLifetime);
+            builder.ExpiresOn = keyExpiry;
+            var key = await _serviceClient.GetUserDelegationKeyAsync(keyStart, keyExpiry, ct).ConfigureAwait(false);
             return blob.GenerateUserDelegationSasUri(builder, key.Value);
         }
         catch (Exception e) when (IsUpstream(e))
@@ -263,6 +277,9 @@ public class BlobStorageProvider : StorageProvider
             throw Failure("GetPublicUrl", container, relative, e);
         }
     }
+
+    // Azure's limit is 7 days; one minute of margin absorbs clock differences.
+    private static readonly TimeSpan MaxDelegationKeyLifetime = TimeSpan.FromDays(7) - TimeSpan.FromMinutes(1);
 
     private static bool IsUpstream(Exception e) =>
         e is RequestFailedException or HttpRequestException or IOException or TimeoutException or AggregateException;
@@ -288,6 +305,14 @@ public class BlobStorageProvider : StorageProvider
         var containerClient = _serviceClient.GetBlobContainerClient(containerName);
         var blobName = _options.LowercaseBlobNames ? relative.ToLowerInvariant() : relative;
         return (containerClient, containerClient.GetBlobClient(blobName), relative);
+    }
+
+    private async Task UploadOnceAsync(BlobContainerClient containerClient, BlobClient blob, Stream content,
+        BlobUploadOptions upload, CancellationToken ct)
+    {
+        await EnsureContainerAsync(containerClient).ConfigureAwait(false);
+        _logger.LogTrace("Uploading blob {BlobName} to container {Container}", blob.Name, containerClient.Name);
+        await blob.UploadAsync(content, upload, ct).ConfigureAwait(false);
     }
 
     private Task EnsureContainerAsync(BlobContainerClient containerClient)
