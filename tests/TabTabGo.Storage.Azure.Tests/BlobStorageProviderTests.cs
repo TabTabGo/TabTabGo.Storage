@@ -266,6 +266,37 @@ public class BlobStorageProviderTests
     }
 
     [Fact]
+    public async Task Store_ContainerDeleted_NonSeekableUpload_FailsOnce_ThenTheNextUploadRecreatesTheContainer()
+    {
+        var provider = Create();
+        await provider.StoreAsync("a.txt", [1], "Text");
+        _azure.UploadFailure = new RequestFailedException(404, "gone", "ContainerNotFound", null);
+        _azure.UploadFailureOnce = true;
+
+        await Assert.ThrowsAsync<StorageException>(() =>
+            provider.StoreAsync(new NonSeekableStream([2, 3]), "b.txt", null, "Text"));
+        await provider.StoreAsync(new NonSeekableStream([4, 5]), "c.txt", null, "Text");
+
+        Assert.Equal(2, _azure.CreateCalls);
+        Assert.Equal<byte>([4, 5], _azure.Blobs["text/c.txt"]);
+    }
+
+    [Fact]
+    public async Task Store_ContainerDeleted_SeekableUploadStartingMidStream_RetriesFromItsStartPosition()
+    {
+        var provider = Create();
+        await provider.StoreAsync("a.txt", [1], "Text");
+        _azure.UploadFailure = new RequestFailedException(404, "gone", "ContainerNotFound", null);
+        _azure.UploadFailureOnce = true;
+        _azure.UploadFailureReadBytes = 2;
+        var body = new MemoryStream([9, 9, 1, 2, 3]) { Position = 2 };
+
+        await provider.StoreAsync(body, "b.txt", null, "Text");
+
+        Assert.Equal<byte>([1, 2, 3], _azure.Blobs["text/b.txt"]);
+    }
+
+    [Fact]
     public async Task Store_ContainerStaysMissing_RetriesOnlyOnce_ThenFails()
     {
         var provider = Create();
@@ -428,12 +459,46 @@ public class BlobStorageProviderTests
 
         Assert.NotNull(uri);
         Assert.NotNull(requestedStart);
-        Assert.True(requestedStart >= before, "the key must not start in the past");
+        Assert.True(requestedStart <= before, "the key must not start in the future");
+        Assert.True(requestedStart >= before.AddMinutes(-6), "the key starts only a few minutes back");
         Assert.True(requestedExpiry - requestedStart < TimeSpan.FromDays(7), "the key window must stay under Azure's 7-day cap");
         var signedExpiry = DateTimeOffset.Parse(System.Web.HttpUtility.ParseQueryString(uri.Query)["se"]!,
             System.Globalization.CultureInfo.InvariantCulture);
         Assert.True(signedExpiry <= requestedExpiry.AddSeconds(1), "the SAS must not outlive the key");
         Assert.True(signedExpiry > before.AddDays(6), "the SAS keeps the requested lifetime up to the clamp");
+    }
+
+    [Fact]
+    public async Task TokenCredential_SixDaysTwentyThreeHours_KeepsTheRequestedLifetime_AndTheKeyStaysUnderSevenDays()
+    {
+        var credential = new StaticTokenCredential();
+        var service = new Mock<BlobServiceClient>(new Uri("https://acct.blob.core.windows.net"), credential, null!) { CallBase = true };
+        DateTimeOffset? requestedStart = null;
+        DateTimeOffset requestedExpiry = default;
+        service.Setup(s => s.GetUserDelegationKeyAsync(It.IsAny<DateTimeOffset?>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback<DateTimeOffset?, DateTimeOffset, CancellationToken>((start, expiry, _) =>
+            {
+                requestedStart = start;
+                requestedExpiry = expiry;
+            })
+            .ReturnsAsync(Response.FromValue(BlobsModelFactory.UserDelegationKey(
+                "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222",
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(7), "b", "2024-11-04",
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(new string('d', 32)))), new Mock<Response>().Object));
+        var provider = new BlobStorageProvider(service.Object,
+            Options.Create(new AzureBlobStorageOptions { ServiceUri = new Uri("https://acct.blob.core.windows.net"), Credential = credential }),
+            _logger);
+        var before = DateTimeOffset.UtcNow;
+        var requested = TimeSpan.FromDays(6) + TimeSpan.FromHours(23);
+
+        var uri = await provider.GetPublicUrlAsync("a.png", new PublicUrlOptions { ExpiresIn = requested }, "Image");
+
+        Assert.NotNull(uri);
+        Assert.True(requestedStart <= before, "the key must not start in the future");
+        Assert.True(requestedExpiry - requestedStart < TimeSpan.FromDays(7), "the key window must stay under Azure's 7-day cap");
+        var signedExpiry = DateTimeOffset.Parse(System.Web.HttpUtility.ParseQueryString(uri.Query)["se"]!,
+            System.Globalization.CultureInfo.InvariantCulture);
+        Assert.InRange((signedExpiry - before).TotalMinutes, requested.TotalMinutes - 1, requested.TotalMinutes + 1);
     }
 
     [Fact]
@@ -583,4 +648,36 @@ public class BlobStorageProviderTests
         public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
             new(GetToken(requestContext, cancellationToken));
     }
+}
+
+/// <summary>A body that cannot seek, like the service's counting stream.</summary>
+internal sealed class NonSeekableStream(byte[] data) : Stream
+{
+    private readonly MemoryStream _inner = new(data);
+
+    public override bool CanRead => true;
+
+    public override bool CanSeek => false;
+
+    public override bool CanWrite => false;
+
+    public override long Length => throw new NotSupportedException();
+
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public override void Flush()
+    {
+    }
+
+    public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 }
