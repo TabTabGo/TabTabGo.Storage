@@ -172,7 +172,7 @@ jobs:
       - name: Build (warnings are errors)
         run: dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
 
-      - name: API compatibility against the published 10.0.0 libraries (v11 is additive-only)
+      - name: Assembly API compatibility (scripts/apicompat.py) against the 10.0.0 libraries; the package-validation baseline in src/Directory.Build.props stays 6.0.8.4 - (v11 is additive-only)
         run: |
           dotnet tool restore
           python3 scripts/apicompat.py

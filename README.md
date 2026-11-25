@@ -113,15 +113,17 @@ Every provider passes the same contract suite:
 - **Credentials:** use an IAM role (S3) or managed identity (Azure). Presigned URLs and SAS live between 1 minute
   and 7 days.
 - Thumbnail generation rejects images over `ImageServiceOptions.MaxPixels` (decompression-bomb guard).
+- **S3 uploads of non-seekable streams are buffered in memory** (the SDK needs the length), so keep `StorageServiceOptions.MaxFileSizeBytes` (default 50 MiB) bounded: raising it or removing it raises per-upload memory with it.
+- **`StoragePath` accepts segments with a trailing dot or space** (for example `a./b`). They alias to `a/b` on Windows with the file-system provider only; S3 and Azure keep them distinct. Do not rely on such names being distinct on Windows.
 
 ## Upgrading from 10.x to 11.0.0
 
-v11 only adds API relative to 10.0.0 (`python3 scripts/apicompat.py` proves it). What changes:
+v11 is intended to only add API relative to 10.0.0; `python3 scripts/apicompat.py` verifies that once 10.0.0 is published (it refuses to run before that). What changes:
 
 | Change | Migration |
 |---|---|
 | `net11.0` only; `TabTabGo.Core` `[11.0.0, 12.0.0)`; EF Core / Microsoft.Extensions 11.0.0 | consume the Core 11 line |
-| `Microsoft.Extensions.Options`, `Logging.Abstractions`, `DependencyInjection.Abstractions` and `Hosting.Abstractions` are part of the .NET 11 platform and are no longer package references (NU1510) | none |
+| `Microsoft.Extensions.Options`, `Logging.Abstractions`, `DependencyInjection.Abstractions` and `Hosting.Abstractions` are part of the .NET 11 platform (`Microsoft.NETCore.App`, no ASP.NET shared framework needed; checked by running a plain `net11.0` console app against the packed packages) and are no longer package references (NU1510) | none |
 | `Microsoft.Extensions.TimeProvider.Testing` / `Diagnostics.Testing` 11.0.0 (test projects) | none |
 
 ## Upgrading from 8.x to 10.0.0
@@ -161,6 +163,8 @@ v10 only adds API relative to 8.0.0 (`python3 scripts/apicompat.py` proves it). 
 | `FileResult` fields are properties and `FileResult` is `IAsyncDisposable` | recompile; dispose it |
 | `ImageSizeExtensions` is in `TabTabGo.Storage.Services` | add the `using` |
 | `FileNotFoundException` / `TTGException` become `ApiException` (404/400) | update exception filters |
+| `GetFile` / `GetImage` throw `ApiException` 404 `FILE_NOT_FOUND` (not `FileNotFoundException`) when the row or its object is missing, and `FileResult.ContentType` now comes from the **stored extension**, never from the media type the client sent (spec SB16, X-2) | catch `ApiException` and read `FileResult.ContentType` instead of the original upload's media type |
+| The obsolete `GetPublicPath(..., expiryDays)` **ignores `expiryDays`** on S3 and Azure and uses the provider default lifetime (S3 `ExpirationMinutes`, default 60; Azure `DefaultSasExpiry`, default 1 hour) (spec SB25) | call `GetPublicUrlAsync` with `PublicUrlOptions.ExpiresIn` when the lifetime matters |
 | `FileService.Update(long, JObject)` (Newtonsoft) became `Update(long, JsonObject)` (System.Text.Json), Core 8 API | switch the argument type |
 | `IPathService.PathSettings { get; }` is a new abstract member | custom `IPathService` implementers must add it |
 | `FileService.PostCreate` / `GetImage` signatures changed (`CancellationToken`, nullable, `FileResult` is `IAsyncDisposable`) | recompile overrides and dispose the result |

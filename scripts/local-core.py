@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build TabTabGo.Storage against a LOCAL TabTabGo.Core of the same line (default: this repository's line, v10).
+"""Build TabTabGo.Storage against a LOCAL TabTabGo.Core of the same line (default: this repository's line).
 
-    python3 scripts/local-core.py            # pack Core v10 (-local.<sha>) and write nuget.local.config
+    python3 scripts/local-core.py            # pack this line's Core (-local.<sha>) and write nuget.local.config
     eval "$(python3 scripts/local-core.py --env)"   # sets TabTabGoCoreVersion for this shell
     dotnet restore TabTabGo.Storage.sln --configfile nuget.local.config
     dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
@@ -22,6 +22,29 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 TABTABGO = REPO.parent
 FEED = TABTABGO / ".local-nuget"
 PACK = TABTABGO / "scripts" / "pack-core-local.py"
+
+
+# Names pack-core-local.py --line expects, and the other names a Core worktree of a line has been created under.
+WORKTREE_NAMES = {"v8": "TabTabGo.Core-v8", "v10": "TabTabGo.Core-net10", "v11": "TabTabGo.Core-v11"}
+WORKTREE_ALIASES = {
+    "v8": ["TabTabGo.Core-v8"],
+    "v10": ["TabTabGo.Core-net10", "TabTabGo.Core-v10", "TabTabGo.Core-rel10"],
+    "v11": ["TabTabGo.Core-v11", "TabTabGo.Core-net11", "TabTabGo.Core-rel11"],
+}
+
+
+def core_worktree(line: str) -> pathlib.Path:
+    """The Core worktree of a line, found with `git worktree list` of the Core repository (not a hard-coded folder name)."""
+    listing = subprocess.run(["git", "-C", str(TABTABGO / "TabTabGo.Core"), "worktree", "list", "--porcelain"],
+                             capture_output=True, text=True)
+    paths = [pathlib.Path(line_[len("worktree "):]) for line_ in listing.stdout.splitlines() if line_.startswith("worktree ")]
+    paths += sorted(TABTABGO.glob("TabTabGo.Core-*"))
+    for alias in WORKTREE_ALIASES[line]:
+        for path in paths:
+            if path.name == alias and path.exists():
+                return path
+    sys.exit(f"No Core worktree for {line} (looked for {', '.join(WORKTREE_ALIASES[line])} in `git worktree list` and {TABTABGO}); "
+             "pass --core <path>.")
 
 
 def default_line() -> str:
@@ -71,19 +94,20 @@ def write_config(version: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--env", action="store_true", help="print the export line for the newest packed version and exit")
+    ap.add_argument("--core", type=pathlib.Path, help="Core worktree to pack (default: found with `git worktree list`)")
     ap.add_argument("--line", choices=["v8", "v10", "v11"], default=default_line(), help="Core line to pack (default: this repository's)")
     args = ap.parse_args()
     line = args.line
     if args.env:
         print(f"export TabTabGoCoreVersion={latest_local_version(line)}")
         return 0
-    if line == "v11":
-        # pack-core-local.py --line v11 looks for a worktree named TabTabGo.Core-v11; the Core 11 worktree is TabTabGo.Core-rel11, so
-        # use the script's explicit mode (a git archive of the clean worktree, version <core>-local.<sha>, into the same feed).
-        subprocess.run([sys.executable, str(PACK), "--core", str(TABTABGO / "TabTabGo.Core-rel11"), "--feed", str(FEED), "--explicit"],
-                       check=True)
-    else:
+    worktree = args.core or core_worktree(line)
+    if worktree.name == WORKTREE_NAMES.get(line):
         subprocess.run([sys.executable, str(PACK), "--line", line], check=True)
+    else:
+        # The line's Core worktree has a different name than pack-core-local.py's --line mode expects: use its explicit mode (a git
+        # archive of the clean worktree, version <core>-local.<sha>, into the same feed).
+        subprocess.run([sys.executable, str(PACK), "--core", str(worktree), "--feed", str(FEED), "--explicit"], check=True)
     version = latest_local_version(line)
     write_config(version)
     print(f"\nWrote {REPO / 'nuget.local.config'}\nNext:\n  export TabTabGoCoreVersion={version}\n"

@@ -252,6 +252,32 @@ public class BlobStorageProviderTests
     }
 
     [Fact]
+    public async Task Store_ContainerDeletedAfterCreation_RecreatesAndRetriesOnce()
+    {
+        var provider = Create();
+        await provider.StoreAsync("a.txt", [1], "Text");
+        _azure.UploadFailure = new RequestFailedException(404, "gone", "ContainerNotFound", null);
+        _azure.UploadFailureOnce = true;
+
+        await provider.StoreAsync("b.txt", [2], "Text");
+
+        Assert.Equal(2, _azure.CreateCalls);
+        Assert.True(_azure.Blobs.ContainsKey("text/b.txt"));
+    }
+
+    [Fact]
+    public async Task Store_ContainerStaysMissing_RetriesOnlyOnce_ThenFails()
+    {
+        var provider = Create();
+        await provider.StoreAsync("a.txt", [1], "Text");
+        _azure.UploadFailure = new RequestFailedException(404, "gone", "ContainerNotFound", null);
+
+        await Assert.ThrowsAsync<StorageException>(() => provider.StoreAsync("b.txt", [2], "Text"));
+
+        Assert.Equal(2, _azure.CreateCalls);
+    }
+
+    [Fact]
     public async Task Store_NoOverwrite_Other409_IsGenericStorageFailure()
     {
         _azure.UploadFailure = new RequestFailedException(409, "deleting", "ContainerBeingDeleted", null);
@@ -374,6 +400,40 @@ public class BlobStorageProviderTests
         var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
         Assert.Equal("11111111-1111-1111-1111-111111111111", query["skoid"]);
         Assert.NotNull(query["sig"]);
+    }
+
+    [Fact]
+    public async Task TokenCredential_SevenDayExpiry_RequestsAKeyWithinAzuresSevenDayLimit()
+    {
+        var credential = new StaticTokenCredential();
+        var service = new Mock<BlobServiceClient>(new Uri("https://acct.blob.core.windows.net"), credential, null!) { CallBase = true };
+        DateTimeOffset? requestedStart = null;
+        DateTimeOffset requestedExpiry = default;
+        service.Setup(s => s.GetUserDelegationKeyAsync(It.IsAny<DateTimeOffset?>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback<DateTimeOffset?, DateTimeOffset, CancellationToken>((start, expiry, _) =>
+            {
+                requestedStart = start;
+                requestedExpiry = expiry;
+            })
+            .ReturnsAsync(Response.FromValue(BlobsModelFactory.UserDelegationKey(
+                "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222",
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(7), "b", "2024-11-04",
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(new string('d', 32)))), new Mock<Response>().Object));
+        var provider = new BlobStorageProvider(service.Object,
+            Options.Create(new AzureBlobStorageOptions { ServiceUri = new Uri("https://acct.blob.core.windows.net"), Credential = credential }),
+            _logger);
+        var before = DateTimeOffset.UtcNow;
+
+        var uri = await provider.GetPublicUrlAsync("a.png", new PublicUrlOptions { ExpiresIn = TimeSpan.FromDays(7) }, "Image");
+
+        Assert.NotNull(uri);
+        Assert.NotNull(requestedStart);
+        Assert.True(requestedStart >= before, "the key must not start in the past");
+        Assert.True(requestedExpiry - requestedStart < TimeSpan.FromDays(7), "the key window must stay under Azure's 7-day cap");
+        var signedExpiry = DateTimeOffset.Parse(System.Web.HttpUtility.ParseQueryString(uri.Query)["se"]!,
+            System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(signedExpiry <= requestedExpiry.AddSeconds(1), "the SAS must not outlive the key");
+        Assert.True(signedExpiry > before.AddDays(6), "the SAS keeps the requested lifetime up to the clamp");
     }
 
     [Fact]

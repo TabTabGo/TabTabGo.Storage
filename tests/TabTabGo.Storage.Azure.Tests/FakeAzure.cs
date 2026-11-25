@@ -37,6 +37,8 @@ public sealed class FakeAzure
 
     public Exception? UploadFailure { get; set; }
 
+    public bool UploadFailureOnce { get; set; }
+
     public Stream? TrackedDownload { get; set; }
 
     public bool CanSas { get; set; } = true;
@@ -85,7 +87,13 @@ public sealed class FakeAzure
                 ct.ThrowIfCancellationRequested();
                 if (UploadFailure is not null)
                 {
-                    throw UploadFailure;
+                    var failure = UploadFailure;
+                    if (UploadFailureOnce)
+                    {
+                        UploadFailure = null;
+                    }
+
+                    throw failure;
                 }
 
                 if (options?.Conditions?.IfNoneMatch == ETag.All && Blobs.ContainsKey(key))
