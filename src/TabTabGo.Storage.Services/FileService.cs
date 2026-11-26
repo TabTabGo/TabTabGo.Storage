@@ -1,4 +1,5 @@
-﻿using System.Linq.Expressions;
+﻿using System.Globalization;
+using System.Linq.Expressions;
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -84,6 +85,12 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     /// <inheritdoc />
     public override long GetKey(TFile entity) => entity.FileId;
 
+    /// <summary>
+    /// Core's bulk helpers (<c>GetDeleteValidationAsync</c>, <c>CountByKeys</c>) build a primary-key <c>IN</c> list and would
+    /// show soft-deleted files; <c>true</c> makes them use <see cref="GetKeyPredicate"/>, which hides them.
+    /// </summary>
+    protected override bool PreferServiceKeyPredicate => true;
+
     /// <summary>Thumbnail object path for an original path: <c>{size}/{path}</c>, PNG for GIF/BMP/ICO sources.</summary>
     /// <param name="size">A non-default size.</param>
     /// <param name="filePath">Original relative path.</param>
@@ -108,23 +115,21 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     #region Reads
 
     /// <summary>Core list read, limited to files that are not soft-deleted.</summary>
-#pragma warning disable CS8765, CS8767, CS8620, CS8604
-    public override Task<IEnumerable<TFile>> GetList(Expression<Func<TFile?, bool>> query, string[]? includeProperties = null,
+    public override Task<IEnumerable<TFile>> GetList(Expression<Func<TFile, bool>> query, string[]? includeProperties = null,
         QueryFlags? flags = null, CancellationToken cancellationToken = default) =>
-        base.GetList(ActiveFilter.And<TFile>(query!)!, includeProperties, flags, cancellationToken);
+        base.GetList(ActiveFilter.And<TFile>(query), includeProperties, flags, cancellationToken);
 
     /// <summary>Core paged read, limited to files that are not soft-deleted.</summary>
-    public override Task<PageList<TFile>> GetPageList(Expression<Func<TFile?, bool>> query,
+    public override Task<PageList<TFile>> GetPageList(Expression<Func<TFile, bool>> query,
         Func<IQueryable<TFile>, IOrderedQueryable<TFile>>? orderBy = null, int page = 0, int pageSize = 25,
         string[]? includeProperties = null, QueryFlags? flags = null, CancellationToken cancellationToken = default) =>
-        base.GetPageList(ActiveFilter.And<TFile>(query!)!, orderBy, page, pageSize, includeProperties, flags, cancellationToken);
+        base.GetPageList(ActiveFilter.And<TFile>(query), orderBy, page, pageSize, includeProperties, flags, cancellationToken);
 
     /// <summary>OData read behind <c>GetPageList(odata)</c> and <c>GetViewModels</c>, limited to files that are not soft-deleted.</summary>
-    public override IQueryable<TFile?> GetQueryable(Microsoft.AspNetCore.OData.Query.ODataQueryOptions<TFile> query,
+    public override IQueryable<TFile> GetQueryable(Microsoft.AspNetCore.OData.Query.ODataQueryOptions<TFile> query,
         out int pageSize, out int skip, out int pageNumber, string[]? includeProperties = null,
         Expression<Func<TFile, bool>>? fixCriteria = null, QueryFlags? flags = null) =>
         base.GetQueryable(query, out pageSize, out skip, out pageNumber, includeProperties, ActiveFilter.And(fixCriteria), flags);
-#pragma warning restore CS8765, CS8767, CS8620, CS8604
 
     /// <inheritdoc />
     public async Task<FileResult> GetFile(long id, CancellationToken cancellationToken = default)
@@ -145,6 +150,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     public async Task<FileResult> GetImage(long id, ImageSize size = ImageSize.Default,
         CancellationToken cancellationToken = default)
     {
+        // An undefined size is a 400 before any lookup or storage probe (it would otherwise be probed as a thumbnail path first).
+        _ = size.GetSize();
         var file = await FindAsync(id, cancellationToken).ConfigureAwait(false) ?? throw NotFound(id);
         if (file.FileType != FileType.Image)
         {
@@ -249,7 +256,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         metadata.IsCompressed = false;
         if (!_options.AllowMetadataExtraProperties)
         {
-            metadata.ExtraProperties = new Dictionary<string, object>();
+            metadata.ExtraProperties = new Dictionary<string, object?>();
         }
         else
         {
@@ -301,7 +308,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         var prepared = Prepare(content);
         var oldPath = file.FilePath;
         var oldType = file.FileType;
-        var previous = new StoredContent(file.FilePath, file.FileSize ?? 0, file.FileExtension, file.OriginalFileName,
+        var previous = new StoredContent(file.FilePath, file.FileSize, file.FileExtension, file.OriginalFileName,
             file.OriginalMediaType);
         var previousUpdated = file.UpdatedDate;
 
@@ -343,16 +350,28 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     /// <param name="entity">Client values; storage-owned fields are ignored.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The updated entity.</returns>
-    public override async Task<TFile> Update(long id, TFile entity, CancellationToken cancellationToken = default)
+    public override Task<TFile> Update(long id, TFile entity, CancellationToken cancellationToken = default) =>
+        UpdateEntityAsync(id, CopyIncoming(entity), scope: null, afterCommit: null, hostTransaction: false, cancellationToken);
+
+    // The caller may pass the tracked instance itself (load, edit, update): take its values before it is restored. The copy is made
+    // once per call, before any retry, so a retried attempt applies the client's values and not the restored database values.
+    private static TFile CopyIncoming(TFile entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        // The caller may pass the tracked instance itself (load, edit, update): take its values before it is restored.
-        var incomingCopy = (TFile)MemberwiseCloneMethod.Invoke(entity, null)!;
-        incomingCopy.ExtraProperties = entity.ExtraProperties is null
-            ? new Dictionary<string, object>()
-            : new Dictionary<string, object>(entity.ExtraProperties);
-        entity = incomingCopy;
-        var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
+        var copy = (TFile)MemberwiseCloneMethod.Invoke(entity, null)!;
+        copy.ExtraProperties = entity.ExtraProperties is null
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>(entity.ExtraProperties);
+        return copy;
+    }
+
+    // The entity update. With a scope the file is loaded inside it and must still be inside it after the save; the steps that must
+    // not run before the commit (removing the old objects, PostUpdate) are handed to afterCommit instead of running here.
+    // `entity` is the private copy made by CopyIncoming; it is only read here, so every retry attempt can reuse it.
+    private async Task<TFile> UpdateEntityAsync(long id, TFile entity, Expression<Func<TFile, bool>>? scope,
+        List<Func<CancellationToken, Task>>? afterCommit, bool hostTransaction, CancellationToken cancellationToken)
+    {
+        var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken, scope).ConfigureAwait(false);
         EnsureDefined(entity.FileType);
         EnsureValidToUpdate(current, merged => FileMetadata<TFile>.CopyFrom(merged, entity, _options.AllowMetadataExtraProperties), 4001);
 
@@ -362,7 +381,22 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         {
             FileMetadata<TFile>.CopyFrom(current, entity, _options.AllowMetadataExtraProperties);
             var newType = entity.FileType == FileType.Unknown ? current.FileType : entity.FileType;
-            return await FinishUpdateAsync(current, newType, cancellationToken).ConfigureAwait(false);
+            if (hostTransaction && scope is not null && !IsInScopeInMemory(current, scope))
+            {
+                // The host owns the transaction and may catch this and commit, so the move out of the scope must not be saved at
+                // all (outside a host transaction the post-save check below rolls our own transaction back).
+                throw NotFound(current.FileId);
+            }
+
+            if (hostTransaction && newType != current.FileType)
+            {
+                // Moving the objects removes the old ones after the unit of work returns; inside the host's transaction that is
+                // before the host commits, so a later rollback would lose them.
+                throw new ApiException("The file type cannot be changed by a scoped update inside a transaction owned by the caller.",
+                    null, LogLevel.Warning, null, HttpStatusCode.Conflict, "RELOCATION_IN_HOST_TRANSACTION");
+            }
+
+            return await FinishUpdateAsync(current, newType, cancellationToken, scope, afterCommit).ConfigureAwait(false);
         }
         catch
         {
@@ -468,6 +502,43 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         Update(id, entity, cancellationToken);
 
     /// <summary>
+    /// The scoped update (Core 10): the file is loaded inside <paramref name="scope"/>, updated through the same allow-listed
+    /// pipeline as <see cref="Update(long, TFile, CancellationToken)"/>, and the whole unit runs in a transaction that is rolled
+    /// back (404) when the file is no longer inside the scope after the save. Removing the old objects and <c>PostUpdate</c> run
+    /// after the commit. Core's own scoped path is not used: it would skip this class's overrides.
+    /// </summary>
+    /// <param name="id">File id.</param>
+    /// <param name="entity">Client values; storage-owned fields are ignored.</param>
+    /// <param name="scope">Scope the file must be in before and after the update; <c>null</c> means unscoped.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated entity.</returns>
+    public override async Task<TFile> UpdateChanges(long id, TFile entity, Expression<Func<TFile, bool>>? scope,
+        CancellationToken cancellationToken)
+    {
+        if (scope is null)
+        {
+            return await UpdateChanges(id, entity, cancellationToken).ConfigureAwait(false);
+        }
+
+        // One client copy for every attempt: a retry clears the tracker and the failed attempt restored the caller's tracked
+        // instance, so copying inside the operation would replay the reverted values and silently commit nothing.
+        var incoming = CopyIncoming(entity);
+        var hostTransaction = _unitOfWork.HasActiveTransaction;
+        var afterCommit = new List<Func<CancellationToken, Task>>();
+        var updated = await _unitOfWork.ExecuteInTransactionAsync(ct =>
+        {
+            afterCommit.Clear();
+            return UpdateEntityAsync(id, incoming, scope, afterCommit, hostTransaction, ct);
+        }, cancellationToken).ConfigureAwait(false);
+        foreach (var step in afterCommit)
+        {
+            await step(cancellationToken).ConfigureAwait(false);
+        }
+
+        return updated;
+    }
+
+    /// <summary>
     /// The update gate. It must hold in <b>both</b> states: the stored row (<paramref name="current"/>: database truth,
     /// so a foreign tenant's or owner's record is refused whatever the client sends) and the row after the allow-listed
     /// client changes (<paramref name="merged"/>: so an update cannot move a record out of, or into, a scope the caller
@@ -481,7 +552,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         IsValidToUpdate(current, out validationErrorMessage) && IsValidToUpdate(merged, out validationErrorMessage);
 
     // Bounds the ExtraProperties bag (key count and serialized size) so a request body cannot grow a row without limit.
-    private void EnsureExtraPropertiesWithinLimits(IDictionary<string, object>? bag)
+    private void EnsureExtraPropertiesWithinLimits(IDictionary<string, object?>? bag)
     {
         if (bag is null || bag.Count == 0)
         {
@@ -507,8 +578,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     {
         var merged = (TFile)MemberwiseCloneMethod.Invoke(current, null)!;
         merged.ExtraProperties = current.ExtraProperties is null
-            ? new Dictionary<string, object>()
-            : new Dictionary<string, object>(current.ExtraProperties);
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>(current.ExtraProperties);
         applyClientChanges(merged);
         if (_options.AllowMetadataExtraProperties)
         {
@@ -525,7 +596,8 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     private static readonly System.Reflection.MethodInfo MemberwiseCloneMethod =
         typeof(object).GetMethod("MemberwiseClone", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
 
-    private async Task<TFile> FinishUpdateAsync(TFile current, FileType newType, CancellationToken ct)
+    private async Task<TFile> FinishUpdateAsync(TFile current, FileType newType, CancellationToken ct,
+        Expression<Func<TFile, bool>>? scope = null, List<Func<CancellationToken, Task>>? afterCommit = null)
     {
         var oldType = current.FileType;
         var oldUpdated = current.UpdatedDate;
@@ -543,6 +615,11 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
 
             await Repo.UpdateAsync(current, ct).ConfigureAwait(false);
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+            if (scope is not null && !await StillInScopeAsync(current.FileId, scope, ct).ConfigureAwait(false))
+            {
+                // The change moved the file out of the caller's scope: refuse it; the transaction rolls the row back.
+                throw NotFound(current.FileId);
+            }
         }
         catch
         {
@@ -552,13 +629,26 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
             throw;
         }
 
-        if (newType != oldType)
+        async Task AfterCommitAsync(CancellationToken token)
         {
-            // The old objects live in the container of the OLD type (V-4).
-            await RemoveObjectsAsync(oldType, current.FilePath).ConfigureAwait(false);
+            if (newType != oldType)
+            {
+                // The old objects live in the container of the OLD type (V-4).
+                await RemoveObjectsAsync(oldType, current.FilePath).ConfigureAwait(false);
+            }
+
+            await PostUpdate(current, token).ConfigureAwait(false);
         }
 
-        await PostUpdate(current, ct).ConfigureAwait(false);
+        if (afterCommit is null)
+        {
+            await AfterCommitAsync(ct).ConfigureAwait(false);
+        }
+        else
+        {
+            afterCommit.Add(AfterCommitAsync);
+        }
+
         return current;
     }
 
@@ -602,9 +692,28 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     /// <param name="id">File id.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The disabled entity.</returns>
-    public override async Task<TFile> Delete(long id, CancellationToken cancellationToken = default)
+    public override async Task<TFile> Delete(long id, CancellationToken cancellationToken = default) =>
+        await SoftDeleteAsync(await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false),
+            cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Soft-deletes a file inside <paramref name="scope"/> (Core 10); a file outside it, or already deleted, is a 404.</summary>
+    /// <param name="id">File id.</param>
+    /// <param name="scope">Scope the file must be in; <c>null</c> means unscoped.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The disabled entity.</returns>
+    public override async Task<TFile> Delete(long id, Expression<Func<TFile, bool>>? scope, CancellationToken cancellationToken)
     {
-        var file = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken).ConfigureAwait(false);
+        if (scope is null)
+        {
+            return await Delete(id, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await SoftDeleteAsync(await LoadTrackedAsync(id, includeDisabled: false, cancellationToken, scope).ConfigureAwait(false),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<TFile> SoftDeleteAsync(TFile file, CancellationToken cancellationToken)
+    {
         EnsureAllDeletable([file]);
         await PreDelete(file, cancellationToken).ConfigureAwait(false);
         var previousUpdated = file.UpdatedDate;
@@ -636,6 +745,40 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         var idList = ids.ToList();
         var files = await LoadManyAsync(f => idList.Contains(f.FileId) && f.IsEnabled, cancellationToken)
             .ConfigureAwait(false);
+        return await SoftDeleteManyAsync(files, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Soft-deletes several files inside <paramref name="scope"/> (Core 10). Every id must name an enabled file inside the
+    /// scope, otherwise the whole request is a 404 and nothing is deleted.
+    /// </summary>
+    /// <param name="ids">File ids.</param>
+    /// <param name="scope">Scope the files must be in; <c>null</c> means unscoped.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The disabled files.</returns>
+    public override async Task<IEnumerable<TFile>> Delete(IEnumerable<long> ids, Expression<Func<TFile, bool>>? scope,
+        CancellationToken cancellationToken)
+    {
+        if (scope is null)
+        {
+            return await Delete(ids, cancellationToken).ConfigureAwait(false);
+        }
+
+        ArgumentNullException.ThrowIfNull(ids);
+        var idList = ids.Distinct().ToList();
+        var files = await LoadManyAsync(ActiveFilter.AndAlso<TFile>(f => idList.Contains(f.FileId) && f.IsEnabled, scope), cancellationToken)
+            .ConfigureAwait(false);
+        var missing = idList.Except(files.Select(f => f.FileId)).Cast<long?>().FirstOrDefault();
+        if (missing is not null)
+        {
+            throw NotFound(missing.Value);
+        }
+
+        return await SoftDeleteManyAsync(files, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<IEnumerable<TFile>> SoftDeleteManyAsync(List<TFile> files, CancellationToken cancellationToken)
+    {
         EnsureAllDeletable(files);
         await RunPreDeleteAsync(files, bulk: true, cancellationToken).ConfigureAwait(false);
         var previous = files.ToDictionary(f => f.FileId, f => f.UpdatedDate);
@@ -770,6 +913,32 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         return file is not null && IsValidToDelete(file, out _);
     }
 
+    /// <summary>Whether the file is inside <paramref name="scope"/> (Core 10), is not soft-deleted, and may be deleted.</summary>
+    /// <param name="id">File id.</param>
+    /// <param name="scope">Scope the file must be in; <c>null</c> means unscoped.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> when the scoped delete would be allowed; a missing or out-of-scope file is <c>false</c>.</returns>
+    public override async Task<bool> CanDelete(long id, Expression<Func<TFile, bool>>? scope, CancellationToken cancellationToken)
+    {
+        var file = await Repo.FirstOrDefaultAsync(ActiveFilter.AndAlso(GetKeyPredicate(id), scope), flags: QueryFlags.DisableTracking,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        return file is not null && IsValidToDelete(file, out _);
+    }
+
+    /// <summary>True only when every id exists inside <paramref name="scope"/> (Core 10), is not soft-deleted, and may be deleted.</summary>
+    /// <param name="ids">File ids.</param>
+    /// <param name="scope">Scope the files must be in; <c>null</c> means unscoped.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> when the scoped bulk delete would delete all of them.</returns>
+    public override async Task<bool> CanDelete(IEnumerable<long> ids, Expression<Func<TFile, bool>>? scope, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        var idList = ids.Distinct().ToList();
+        var files = (await Repo.GetAsync(ActiveFilter.AndAlso<TFile>(f => idList.Contains(f.FileId) && f.IsEnabled, scope),
+            flags: QueryFlags.DisableTracking, cancellationToken: cancellationToken).ConfigureAwait(false)).ToList();
+        return files.Count == idList.Count && files.All(f => IsValidToDelete(f, out _));
+    }
+
     /// <summary>True only when every id exists, is not soft-deleted, and may be deleted.</summary>
     /// <param name="ids">File ids.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -802,7 +971,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
     private sealed record StoredObject(string Container, string Path);
 
     private sealed record StoredContent(
-        string FilePath, long Size, string Extension, string OriginalFileName, string OriginalMediaType);
+        string FilePath, long? Size, string Extension, string OriginalFileName, string OriginalMediaType);
 
     private sealed record PreparedUpload(string FileName, string Extension);
 
@@ -815,6 +984,24 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         }
     }
 
+    // The merged entity checked against the scope before anything is saved, used only when the host owns the transaction. A scope the
+    // in-memory evaluation cannot handle (database functions, navigations that are not loaded) is not an answer: inside a host
+    // transaction nothing can be rolled back by us, so it fails closed (the update is refused) instead of being let through.
+    private static bool IsInScopeInMemory(TFile merged, Expression<Func<TFile, bool>> scope)
+    {
+        try
+        {
+            return scope.Compile()(merged);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NullReferenceException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private async Task<bool> StillInScopeAsync(long id, Expression<Func<TFile, bool>> scope, CancellationToken ct) =>
+        await Repo.AnyAsync(ActiveFilter.AndAlso(GetKeyPredicate(id), scope), QueryFlags.DisableTracking, ct).ConfigureAwait(false);
+
     // Read-only lookup of the database truth (never the tracked instance, which a caller may have edited).
     private async Task<TFile?> FindAsync(long id, CancellationToken ct) =>
         await Repo.FirstOrDefaultAsync(GetKeyPredicate(id), flags: QueryFlags.DisableTracking, cancellationToken: ct)
@@ -822,9 +1009,10 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
 
     // The tracked entity to mutate. Storage-owned and audit fields are restored from the database first, so unsaved
     // edits made earlier on the same context can never be persisted or used to address another file's objects.
-    private async Task<TFile> LoadTrackedAsync(long id, bool includeDisabled, CancellationToken ct)
+    private async Task<TFile> LoadTrackedAsync(long id, bool includeDisabled, CancellationToken ct,
+        Expression<Func<TFile, bool>>? scope = null)
     {
-        var key = includeDisabled ? KeyOnly(id) : GetKeyPredicate(id);
+        var key = ActiveFilter.AndAlso(includeDisabled ? KeyOnly(id) : GetKeyPredicate(id), scope);
         var tracked = await Repo.FirstOrDefaultAsync(key, cancellationToken: ct).ConfigureAwait(false) ?? throw NotFound(id);
         var truth = await Repo.FirstOrDefaultAsync(key, flags: QueryFlags.DisableTracking, cancellationToken: ct)
             .ConfigureAwait(false) ?? throw NotFound(id);
@@ -909,8 +1097,19 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         }
 
         target.ExtraProperties = truth.ExtraProperties is null
-            ? new Dictionary<string, object>()
-            : new Dictionary<string, object>(truth.ExtraProperties);
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>(truth.ExtraProperties);
+    }
+
+    /// <summary>
+    /// Core 10's host-facing check of the <c>ExtraProperties</c> bag; applies this service's own key and size limits
+    /// (<see cref="StorageServiceOptions.MaxExtraPropertyKeys"/>, <see cref="StorageServiceOptions.MaxExtraPropertiesBytes"/>).
+    /// </summary>
+    /// <param name="entity">The file whose bag is checked.</param>
+    public override void EnsureExtraPropertiesWithinLimits(TFile entity)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        EnsureExtraPropertiesWithinLimits(entity.ExtraProperties);
     }
 
     private static ApiException NotFound(long id) =>
@@ -943,7 +1142,7 @@ public class FileService<TFile> : BaseService<TFile, long>, IFileService<TFile> 
         List<StoredObject> stored, CancellationToken ct)
     {
         var container = type.ToString();
-        var path = $"{_timeProvider.GetUtcNow():yyyyMMdd}/{Guid.NewGuid():N}{prepared.Extension}";
+        var path = $"{_timeProvider.GetUtcNow().ToString("yyyyMMdd", CultureInfo.InvariantCulture)}/{Guid.NewGuid():N}{prepared.Extension}";
         var writeOptions = new StorageWriteOptions { ContentType = ContentTypeMap.FromExtension(prepared.Extension) };
 
         await using var source = content.OpenReadStream();

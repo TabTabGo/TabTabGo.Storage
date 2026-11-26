@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Build TabTabGo.Storage against a LOCAL TabTabGo.Core before Core 8.0.1 is on nuget.org.
+"""Build TabTabGo.Storage against a LOCAL TabTabGo.Core of the same line (default: this repository's line, v10).
 
-    python3 scripts/local-core.py            # pack Core v8 (-local.<sha>) and write nuget.local.config
+    python3 scripts/local-core.py            # pack Core v10 (-local.<sha>) and write nuget.local.config
     eval "$(python3 scripts/local-core.py --env)"   # sets TabTabGoCoreVersion for this shell
     dotnet restore TabTabGo.Storage.sln --configfile nuget.local.config
     dotnet build TabTabGo.Storage.sln -c Release -warnaserror --no-restore
 
-What it does: runs tabtabgo/scripts/pack-core-local.py --line v8 (Core solution packed sequentially from a git archive
+What it does: runs tabtabgo/scripts/pack-core-local.py --line <line> (Core solution packed sequentially from a git archive
 of the clean Core worktree, version <core>-local.<sha>, into tabtabgo/.local-nuget), then writes the git-ignored
 nuget.local.config (nuget.org + that folder, with source mapping so only TabTabGo.Core packages come from it).
 Nothing outside this repository, tabtabgo/.local-nuget and the Core archive scratch folder is touched, and nothing
@@ -24,10 +24,18 @@ FEED = TABTABGO / ".local-nuget"
 PACK = TABTABGO / "scripts" / "pack-core-local.py"
 
 
-def latest_local_version() -> str:
+def default_line() -> str:
+    """The line of this repository, read from the target framework (net8.0 -> v8, net10.0 -> v10, net11.0 -> v11)."""
+    props = (REPO / "Directory.Build.props").read_text()
+    major = re.search(r"<TargetFramework>net(\d+)\.0</TargetFramework>", props).group(1)
+    return f"v{major}"
+
+
+def latest_local_version(line: str) -> str:
+    major = line.removeprefix("v")
     versions = []
-    for f in FEED.glob("TabTabGo.Core.[0-9]*-local.*.nupkg"):
-        m = re.match(r"TabTabGo\.Core\.(\d+\.\d+\.\d+-local\.[0-9a-f]+)\.nupkg", f.name)
+    for f in FEED.glob(f"TabTabGo.Core.{major}.*-local.*.nupkg"):
+        m = re.match(r"TabTabGo\.Core\.(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+?)?-local\.[0-9a-f]+)\.nupkg", f.name)
         if m:
             versions.append((f.stat().st_mtime, m.group(1)))
     if not versions:
@@ -63,12 +71,14 @@ def write_config(version: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--env", action="store_true", help="print the export line for the newest packed version and exit")
+    ap.add_argument("--line", choices=["v8", "v10", "v11"], default=default_line(), help="Core line to pack (default: this repository's)")
     args = ap.parse_args()
+    line = args.line
     if args.env:
-        print(f"export TabTabGoCoreVersion={latest_local_version()}")
+        print(f"export TabTabGoCoreVersion={latest_local_version(line)}")
         return 0
-    subprocess.run([sys.executable, str(PACK), "--line", "v8"], check=True)
-    version = latest_local_version()
+    subprocess.run([sys.executable, str(PACK), "--line", line], check=True)
+    version = latest_local_version(line)
     write_config(version)
     print(f"\nWrote {REPO / 'nuget.local.config'}\nNext:\n  export TabTabGoCoreVersion={version}\n"
           "  dotnet restore TabTabGo.Storage.sln --configfile nuget.local.config\n"

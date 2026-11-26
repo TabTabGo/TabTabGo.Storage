@@ -2,7 +2,7 @@
 """Fail when merged Cobertura coverage of src/ assemblies is below the thresholds (spec FR-9).
 
 Usage: coverage-gate.py <results-dir> [--line 85] [--branch 75]
-Reads every coverage.cobertura.xml under the directory; test and TestKit assemblies are ignored. Lines and branches
+Reads every coverage.cobertura*.xml (VSTest: coverage.cobertura.xml; coverlet.MTP: coverage.cobertura.<stamp>.xml) under the directory; test and TestKit assemblies are ignored. Lines and branches
 are merged per (file, line) across reports so the same source covered by several test projects counts once.
 """
 import argparse
@@ -18,13 +18,18 @@ args = parser.parse_args()
 
 lines = {}      # (file, number) -> hits
 branches = {}   # (file, number) -> (covered, total) maximum seen
-for report in pathlib.Path(args.results).rglob("coverage.cobertura.xml"):
+for report in pathlib.Path(args.results).rglob("coverage.cobertura*.xml"):
     for cls in ET.parse(report).getroot().iter("class"):
         filename = cls.get("filename", "").replace("\\", "/")
-        if "/src/" not in "/" + filename and not filename.startswith("src/"):
+        # Only this repository's own sources (coverlet.MTP also reports third-party assemblies such as Docker.DotNet, whose
+        # deterministic source paths also contain /src/).
+        if "/src/TabTabGo.Storage" not in "/" + filename:
             continue
         if "Tests" in filename or "TestKit" in filename:
             continue
+        # The same file can be reported with a relative or an absolute path (embedded-source assemblies): merge on the part
+        # from src/TabTabGo.Storage on.
+        filename = filename[("/" + filename).index("/src/TabTabGo.Storage") :]
         for line in cls.iter("line"):
             key = (filename, line.get("number"))
             lines[key] = max(lines.get(key, 0), int(line.get("hits", "0")))

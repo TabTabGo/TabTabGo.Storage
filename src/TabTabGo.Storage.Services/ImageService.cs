@@ -43,10 +43,15 @@ public class ImageService : IImageService
         // Validate before touching the disk so a rejected image never leaves a file behind.
         EnsureSupported(outputFormat);
 
+        // Encode to memory first: a corrupt or oversized image must never truncate or create the target file.
+        using var buffer = new MemoryStream();
+        Resize(inputStream, outputSize, buffer, outputFormat, cropSquare, squareFrame);
+
         // FileMode.Create truncates; OpenWrite would leave trailing bytes when overwriting a larger file.
         using (var output = new FileStream(outputPath, FileMode.Create, FileAccess.Write))
         {
-            Resize(inputStream, outputSize, output, outputFormat, cropSquare, squareFrame);
+            buffer.Position = 0;
+            buffer.CopyTo(output);
         }
 
         if (!File.Exists(outputPath))
@@ -147,7 +152,7 @@ public class ImageService : IImageService
             _ => SKMatrix.Identity,
         };
         canvas.Concat(in matrix);
-        canvas.DrawBitmap(source, 0, 0);
+        canvas.DrawBitmap(source, 0, 0, SKSamplingOptions.Default);
         return target;
     }
 

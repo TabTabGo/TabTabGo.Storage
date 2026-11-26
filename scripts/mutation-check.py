@@ -23,6 +23,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 EQUIVALENT = {"E-6", "M11"}
 
 # id, severity, project, file, old, new, description
+SV = "src/TabTabGo.Storage.Services/FileService.cs"
 M = [
     ("F-1", "C", "FileStorage.Tests", "src/TabTabGo.Storage/Paths/StoragePath.cs",
      "            if (IsDotsOrSpaces(segment))", "            if (false && IsDotsOrSpaces(segment))", "path traversal: '..' segments accepted"),
@@ -56,8 +57,32 @@ M = [
     ("F-6", "M", "FileStorage.Tests", "src/TabTabGo.Storage.FileStorage/FileStorageProvider.cs",
      "            File.Move(temp, full, overwrite);\n            return relative;", "            File.Copy(temp, full, overwrite);\n            return relative;", "overwrite is not atomic (copy instead of move)"),
     ("A-3", "M", "Aws.Tests", "src/TabTabGo.Storage.Aws/S3StorageProvider.cs",
-     "        catch (AmazonS3Exception e) when (IsNotFound(e))\n        {\n            return null;\n        }\n        catch (Exception e) when (IsUpstream(e))\n        {\n            throw Failure(\"Retrieve\"",
-     "        catch (Exception e) when (IsUpstream(e))\n        {\n            return null;\n        }\n        catch (Exception e) when (IsUpstream(e))\n        {\n            throw Failure(\"Retrieve\"", "every S3 read error becomes 'not found'"),
+     "when (IsNotFound(e) || IsAccessDenied(e))\n        {\n            LogForbiddenAsNotFound(e, \"Retrieve\"",
+     "when (true)\n        {\n            LogForbiddenAsNotFound(e, \"Retrieve\"", "every S3 exception on a GET becomes 'not found' (S3 exceptions only)"),
+    ("BL-2a", "M", "Aws.Tests", "src/TabTabGo.Storage.Aws/S3StorageProvider.cs",
+     "(IsNotFound(e) || IsAccessDenied(e))\n        {\n            LogForbiddenAsNotFound(e, \"Retrieve\"", "(IsNotFound(e))\n        {\n            LogForbiddenAsNotFound(e, \"Retrieve\"",
+     "S3 403 AccessDenied on a GET is an error again (BL-2 dropped)"),
+    ("BL-2b", "M", "Aws.Tests", "src/TabTabGo.Storage.Aws/S3StorageProvider.cs",
+     'e.StatusCode == HttpStatusCode.Forbidden && e.ErrorCode == "AccessDenied";', "e.StatusCode == HttpStatusCode.Forbidden;",
+     "every 403 on a GET becomes 'not found' (InvalidAccessKeyId, SignatureDoesNotMatch, ... hidden)"),
+    ("BL-2c", "M", "Aws.Tests", "src/TabTabGo.Storage.Aws/S3StorageProvider.cs",
+     '        e.StatusCode == HttpStatusCode.Forbidden && e.ErrorCode is not (', '        e.StatusCode == HttpStatusCode.Forbidden || e.ErrorCode is not (',
+     "a non-403 S3 error on HEAD becomes 'not found'"),
+    ("BL-2d", "M", "Aws.Tests", "src/TabTabGo.Storage.Aws/S3StorageProvider.cs",
+     "ProviderName, operation, container, extension, hash, e.ErrorCode, e.RequestId", "ProviderName, operation, container, relative, hash, e.ErrorCode, e.RequestId",
+     "the BL-2 warning logs the raw storage path"),
+    ("L1-S3", "M", "Aws.Tests", "src/TabTabGo.Storage.Aws/S3StorageProvider.cs",
+     "return NormalizePath(ProviderName, operation, container, filePath, StoragePathLimits.S3ObjectKey(name));", "return NormalizePath(ProviderName, operation, container, filePath);",
+     "S3 key length limit not applied (over-long key reaches S3 as a 502)"),
+    ("L1-Az", "M", "Azure.Tests", "src/TabTabGo.Storage.AzureStorage/BlobStorageProvider.cs",
+     "NormalizePath(ProviderName, operation, container, filePath, StoragePathLimits.AzureBlobName)", "NormalizePath(ProviderName, operation, container, filePath)",
+     "Azure blob name length limit not applied"),
+    ("L1-File", "M", "FileStorage.Tests", "src/TabTabGo.Storage.FileStorage/FileStorageProvider.cs",
+     "var relative = NormalizePath(ProviderName, operation, container, filePath, StoragePathLimits.FileSystem);", "var relative = NormalizePath(ProviderName, operation, container, filePath);",
+     "file-system segment length limit not applied"),
+    ("Cf", "M", "Tests", "src/TabTabGo.Storage/Paths/StoragePath.cs",
+     "            if (Rune.GetUnicodeCategory(rune) == UnicodeCategory.Format)", "            if (false)",
+     "Unicode format characters (U+202E, U+200B, ...) accepted in paths"),
     ("A-5", "M", "Aws.Tests", "src/TabTabGo.Storage.Aws/S3ClientFactory.cs",
      "        return string.IsNullOrEmpty(configuration.AccessKey) || string.IsNullOrEmpty(configuration.SecretKey)\n            ? null\n            : new BasicAWSCredentials(configuration.AccessKey, configuration.SecretKey);",
      "        return new BasicAWSCredentials(configuration.AccessKey ?? string.Empty, configuration.SecretKey ?? string.Empty);", "static keys mandatory: default credential chain not used"),
@@ -112,7 +137,8 @@ M = [
     ("N8", "L", "Tests", "src/TabTabGo.Storage/ContentTypes/ContentDispositionFormatter.cs",
      " or '\\u2060' or '\\uFEFF' or '\\u2028' or '\\u2029'", "", "zero-width characters kept in names"),
     ("Tracked", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
-     "        entity = incomingCopy;", "", "caller-edited tracked instance loses its allow-listed edits"),
+     ["        entity = incomingCopy;", "UpdateEntityAsync(id, CopyIncoming(entity), scope: null"],
+     ["", "UpdateEntityAsync(id, entity, scope: null"], "caller-edited tracked instance loses its allow-listed edits"),
     ("M15", "M", "Aws.Tests", "src/TabTabGo.Storage.Aws/S3ResponseStream.cs",
      "            _owner.Dispose();", "", "S3 response (and its HTTP connection) is not disposed with the stream"),
     ("M11", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
@@ -152,6 +178,71 @@ M = [
     ("R6-4", "L", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
      "        // Change detection scans every tracked entity: run it once for the batch, then compare each file.\n        _ = _unitOfWork.GetChanges();\n",
      "", "batch loads stop forcing change detection (navigation edits go undetected)"),
+    ("V10-1", "M", "Services.Tests", SV,
+     "return await SoftDeleteAsync(await LoadTrackedAsync(id, includeDisabled: false, cancellationToken, scope)",
+     "return await SoftDeleteAsync(await LoadTrackedAsync(id, includeDisabled: false, cancellationToken)",
+     "scoped soft Delete ignores the scope (cross-tenant delete)"),
+    ("V10-1b", "M", "Services.Tests", SV,
+     "var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken, scope)",
+     "var current = await LoadTrackedAsync(id, includeDisabled: false, cancellationToken)",
+     "scoped UpdateChanges loads the file without the scope (cross-tenant update)"),
+    ("S3", "M", "Services.Tests", SV,
+     "var updated = await _unitOfWork.ExecuteInTransactionAsync(ct =>",
+     "var updated = await ((Func<Func<CancellationToken, Task<TFile>>, CancellationToken, Task<TFile>>)((f, c) => f(c)))(ct =>",
+     "scoped UpdateChanges runs without the transaction (an out-of-scope result is not rolled back)"),
+    ("S4", "M", "Services.Tests", SV,
+     "        if (afterCommit is null)\n", "        if (true)\n",
+     "PostUpdate and the old-object removal run before the commit on the scoped path"),
+    ("S5", "M", "Services.Tests", SV,
+     "LoadManyAsync(ActiveFilter.AndAlso<TFile>(f => idList.Contains(f.FileId) && f.IsEnabled, scope), cancellationToken)",
+     "LoadManyAsync(f => idList.Contains(f.FileId) && f.IsEnabled, cancellationToken)",
+     "scoped bulk Delete loads without the scope"),
+    ("S6", "M", "Services.Tests", SV,
+     "Repo.GetAsync(ActiveFilter.AndAlso<TFile>(f => idList.Contains(f.FileId) && f.IsEnabled, scope),",
+     "Repo.GetAsync(ActiveFilter.AndAlso<TFile>(f => idList.Contains(f.FileId) && f.IsEnabled, null),",
+     "scoped CanDelete(ids) ignores the scope"),
+    ("S7", "M", "Services.Tests", SV,
+     "entity => entity.FileId == id && entity.IsEnabled;", "entity => entity.FileId == id;",
+     "GetKeyPredicate without IsEnabled (inherited reads see soft-deleted files)"),
+    ("S8", "M", "Services.Tests", SV,
+     "    public override Task<TFile> UpdateChanges(long id, TFile entity, CancellationToken cancellationToken) =>\n        Update(id, entity, cancellationToken);",
+     "    public override Task<TFile> UpdateChanges(long id, TFile entity, CancellationToken cancellationToken) =>\n        base.UpdateChanges(id, entity, cancellationToken);",
+     "3-argument UpdateChanges falls back to Core's (no allow-list)"),
+    ("S9", "M", "Services.Tests", SV,
+     "        if (scope is null)\n        {\n            return await UpdateChanges(id, entity, cancellationToken).ConfigureAwait(false);\n        }\n\n        // One client copy",
+     "        if (scope is not null)\n        {\n            return await UpdateChanges(id, entity, cancellationToken).ConfigureAwait(false);\n        }\n\n        // One client copy",
+     "scoped UpdateChanges with a scope behaves unscoped"),
+    ("R7-1", "M", "Services.Tests", SV,
+     "return UpdateEntityAsync(id, incoming, scope, afterCommit, hostTransaction, ct);",
+     "return UpdateEntityAsync(id, CopyIncoming(entity), scope, afterCommit, hostTransaction, ct);",
+     "scoped UpdateChanges copies the client entity per attempt (a transient-failure retry commits nothing)"),
+    ("R7-2", "M", "Services.Tests", SV,
+     "if (hostTransaction && newType != current.FileType)", "if (false && newType != current.FileType)",
+     "a relocation inside a host transaction is not refused"),
+    ("R7-3", "L", "Services.Tests", SV,
+     "        EnsureExtraPropertiesWithinLimits(entity.ExtraProperties);\n    }\n\n    private static ApiException NotFound",
+     "    }\n\n    private static ApiException NotFound",
+     "Core 10 EnsureExtraPropertiesWithinLimits(entity) does not apply Storage's limits"),
+    ("V10-2", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "if (scope is not null && !await StillInScopeAsync(current.FileId, scope, ct).ConfigureAwait(false))", "if (false)",
+     "scoped UpdateChanges does not check that the file is still in scope after the save"),
+    ("V10-3", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "protected override bool PreferServiceKeyPredicate => true;", "protected override bool PreferServiceKeyPredicate => false;",
+     "inherited bulk helpers (CountByKeys, GetDeleteValidationAsync) see soft-deleted files"),
+    ("V10-4", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "if (missing is not null)", "if (false)", "scoped bulk Delete silently skips ids outside the scope"),
+    ("V10-5", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "ActiveFilter.AndAlso(GetKeyPredicate(id), scope), flags: QueryFlags.DisableTracking,\n            cancellationToken: cancellationToken)", "GetKeyPredicate(id), flags: QueryFlags.DisableTracking,\n            cancellationToken: cancellationToken)",
+     "scoped CanDelete ignores the scope"),
+    ("V10-6", "L", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "        // Change detection scans every tracked entity: run it once for the batch, then compare each file.\n        _ = _unitOfWork.GetChanges();\n",
+     "", "batch loads stop forcing change detection (R6-4 on v10)"),
+    ("T5", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "            afterCommit.Clear();\n", "",
+     "after-commit steps of a failed attempt are kept on retry (PostUpdate and the old-object removal run twice)"),
+    ("R10-1", "M", "Services.Tests", "src/TabTabGo.Storage.Services/FileService.cs",
+     "if (hostTransaction && scope is not null && !IsInScopeInMemory(current, scope))", "if (false)",
+     "a scoped update that leaves the scope is saved when the host owns the transaction"),
     ("E-6", "M", "Data.EF.Tests", "src/TabTabGo.Storage.Data.EF/StorageModelsBuilder.cs",
      "        modelBuilder.Property(f => f.CreatedBy).IsRequired();", "", "audit-column pin removed (equivalent on v8: Core 8 columns are already required; it only bites on Core 10)"),
 ]
@@ -191,7 +282,7 @@ def main() -> int:
         time.sleep(1.1)   # a fresh mtime, so the incremental build cannot reuse the previous mutant's output
         os.utime(path)
         try:
-            result = run(["dotnet", "test", f"tests/TabTabGo.Storage.{project}", "-c", "Release", "--no-restore"])
+            result = run(["dotnet", "test", "--project", f"tests/TabTabGo.Storage.{project}", "-c", "Release", "--no-restore"])
         finally:
             run(["git", "checkout", "--quiet", "--", rel])
             time.sleep(1.1)
@@ -200,7 +291,8 @@ def main() -> int:
         if re.search(r" error CS\d+", out):
             rows.append((rid, sev, what, "NO-BUILD", "mutant does not compile"))
             continue
-        failed = sorted(set(re.findall(r"^\s+Failed (\S+)", out, re.M)))
+        # VSTest prints "  Failed Name"; Microsoft.Testing.Platform (v10 and later) prints "failed Name (12ms)" at the line start.
+        failed = sorted(set(re.findall(r"^\s*[Ff]ailed (\S+)", out, re.M)))
         names = [f.split(".")[-1].split("(")[0] for f in failed]
         verdict = "KILLED" if failed else "SURVIVED"
         rows.append((rid, sev, what, verdict, f"{len(failed)} failing: " + ", ".join(sorted(set(names))[:4]) + (" ..." if len(set(names)) > 4 else "")))

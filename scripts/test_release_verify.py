@@ -26,57 +26,62 @@ def branches(*names: str) -> str:
 
 class TagTests(unittest.TestCase):
     CASES = [
-        ("v8.0.0", "net8.0", "8.0.0", "releases/v8.0.x/v8.0.0", "8.0.0", False),
-        ("v10.0.0", "net10.0", "10.0.0", "releases/v10.0.x/v10.0.0", "10.0.0", False),
-        ("v11.0.0-rc.1", "net11.0", "11.0.0-rc.1", "releases/v11.0.x/v11.0.0-rc.1", "11.0.0-rc.1", True),
-        ("v11.0.0", "net11.0", "11.0.0", "releases/v11.0.x/v11.0.0", "11.0.0", False),
-        ("v11.2.3-beta.4", "net11.0", "11.2.3-beta.4", "releases/v11.2.x/v11.2.3", "11.2.3-beta.4", True),
+        ("v8.0.0", "net8.0", "8.0.0", "releases/v8.0.x/v8.0.0"),
+        ("v10.0.0", "net10.0", "10.0.0", "releases/v10.0.x/v10.0.0"),
+        ("v11.0.0", "net11.0", "11.0.0", "releases/v11.0.x/v11.0.0"),
+        ("v11.2.3", "net11.0", "11.2.3", "releases/v11.2.x/v11.2.3"),
     ]
 
     def test_valid_tags_pass(self):
-        for tag, tfm, declared, branch, version, prerelease in self.CASES:
+        for tag, tfm, declared, branch in self.CASES:
             with self.subTest(tag=tag):
                 result = rv.check_tag(tag, props(tfm, declared), branches("main", branch))
-                self.assertEqual(version, result.version)
-                self.assertEqual(prerelease, result.prerelease)
+                self.assertEqual(tag[1:], result.version)
 
-    def test_the_declared_version_is_compared_with_the_full_tag_version(self):
-        # Regression: the suffix used to be stripped from the tag, so neither -rc.1 nor the stable tag could match a -rc.1 Version.
+    def test_the_declared_version_must_equal_the_tag_version(self):
         with self.assertRaises(rv.ReleaseError):
             rv.check_tag("v11.0.0", props("net11.0", "11.0.0-rc.1"), branches("releases/v11.0.x/v11.0.0"))
         with self.assertRaises(rv.ReleaseError):
-            rv.check_tag("v11.0.0-rc.1", props("net11.0", "11.0.0"), branches("releases/v11.0.x/v11.0.0-rc.1"))
-        with self.assertRaises(rv.ReleaseError):
-            rv.check_tag("v11.0.0-rc.2", props("net11.0", "11.0.0-rc.1"), branches("releases/v11.0.x/v11.0.0-rc.1"))
+            rv.check_tag("v11.0.1", props("net11.0", "11.0.0"), branches("releases/v11.0.x/v11.0.1"))
 
     def test_target_framework_major_must_match_the_tag_major(self):
         with self.assertRaises(rv.ReleaseError):
             rv.check_tag("v10.0.0", props("net8.0", "10.0.0"), branches("releases/v10.0.x/v10.0.0"))
         with self.assertRaises(rv.ReleaseError):
-            rv.check_tag("v11.0.0-rc.1", props("net10.0", "11.0.0-rc.1"), branches("releases/v11.0.x/v11.0.0-rc.1"))
+            rv.check_tag("v11.0.0", props("net10.0", "11.0.0"), branches("releases/v11.0.x/v11.0.0"))
 
     def test_the_commit_must_be_on_a_release_branch_of_the_same_major_minor(self):
         for bad in ("releases/v10.0.x/v10.0.0", "releases/v11.1.x/v11.1.0", "feature/x", "main"):
             with self.subTest(branch=bad), self.assertRaises(rv.ReleaseError):
-                rv.check_tag("v11.0.0-rc.1", props("net11.0", "11.0.0-rc.1"), branches(bad))
-        # the branch is derived from the core part: the suffix never takes part
-        rv.check_tag("v11.0.0-rc.1", props("net11.0", "11.0.0-rc.1"), branches("releases/v11.0.x/v11.0.0"))
+                rv.check_tag("v11.0.0", props("net11.0", "11.0.0"), branches(bad))
+
+    def test_pre_release_and_build_metadata_tags_are_refused_with_the_stable_only_message(self):
+        # Every release is stable: no -rc / -beta / -alpha / -preview tag and no +build metadata, even when Directory.Build.props
+        # declares the same version and the branch exists.
+        for tag in ("v11.0.0-rc.1", "v11.0.0-beta.1", "v11.0.0-alpha.1", "v11.0.0-preview.1", "v11.0.0-rc", "v1.2.3-gamma.1",
+                    "v11.0.0-rc.1-x", "v1.2.3-rc.01", "v1.2.3-rc.0", "v11.0.0+x", "v11.0.0+build.5", "v11.0.0-rc.1+x"):
+            with self.subTest(tag=tag):
+                with self.assertRaises(rv.ReleaseError) as raised:
+                    rv.parse_tag(tag)
+                self.assertIn("only stable vMAJOR.MINOR.PATCH tags are released", str(raised.exception))
+                with self.assertRaises(rv.ReleaseError):
+                    rv.check_tag(tag, props("net11.0", tag[1:]), branches("releases/v11.0.x/v11.0.0"))
 
     def test_malformed_tags_are_refused(self):
-        for tag in ("v11.0", "11.0.0", "v1.2.3-rc", "v1.2.3-gamma.1", "v1.2.3\nextra", "v1.2.3 ", "v1.2.3-rc.1-x", ""):
+        for tag in ("v11.0", "11.0.0", "v1.2.3\nextra", "v1.2.3 ", "v1.2.3-\nrc", ""):
             with self.subTest(tag=repr(tag)), self.assertRaises(rv.ReleaseError):
                 rv.parse_tag(tag)
 
 
 class TagStrictnessTests(unittest.TestCase):
     def test_non_ascii_digits_and_leading_zeros_are_refused(self):
-        # \d matches Arabic-Indic digits and the old pattern accepted leading zeros: v010.0.0 and v1.2.3-rc.01 are not canonical.
-        for tag in ("v\u0661\u0660.0.0", "v010.0.0", "v1.02.3", "v1.2.03", "v1.2.3-rc.01", "v00.0.0", "v1.2.3-rc.00"):
+        # \d matches Arabic-Indic digits and the old pattern accepted leading zeros: v010.0.0 is not canonical.
+        for tag in ("v\u0661\u0660.0.0", "v010.0.0", "v1.02.3", "v1.2.03", "v00.0.0"):
             with self.subTest(tag=ascii(tag)), self.assertRaises(rv.ReleaseError):
                 rv.parse_tag(tag)
 
     def test_zero_components_are_fine(self):
-        for tag in ("v0.0.0", "v10.0.10", "v1.2.3-rc.0", "v1.2.3-rc.10"):
+        for tag in ("v0.0.0", "v10.0.10", "v1.2.3"):
             with self.subTest(tag=tag):
                 self.assertEqual(tag[1:], rv.parse_tag(tag).version)
 
@@ -128,8 +133,8 @@ class NotPublishedTests(unittest.TestCase):
 
     def test_an_unpublished_version_passes(self):
         urls = []
-        rv.check_not_published(["Pkg.A"], "1.2.3-rc.1", lambda url: urls.append(url) or 404)
-        self.assertEqual(["https://api.nuget.org/v3-flatcontainer/pkg.a/1.2.3-rc.1/pkg.a.nuspec"], urls)
+        rv.check_not_published(["Pkg.A"], "1.2.3", lambda url: urls.append(url) or 404)
+        self.assertEqual(["https://api.nuget.org/v3-flatcontainer/pkg.a/1.2.3/pkg.a.nuspec"], urls)
 
     def test_an_unclear_answer_fails_closed(self):
         for answer in (500, 403, 302):
@@ -158,7 +163,7 @@ class PackageSetTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def pack(self, package_id, version="11.0.0-rc.1", tfm="net11.0", readme=True, symbols=True):
+    def pack(self, package_id, version="11.0.0", tfm="net11.0", readme=True, symbols=True):
         with zipfile.ZipFile(self.out / f"{package_id}.{version}.nupkg", "w") as z:
             z.writestr(f"{package_id}.nuspec", f"<package><metadata><version>{version}</version></metadata></package>")
             z.writestr(f"lib/{tfm}/{package_id}.dll", b"x")
@@ -172,7 +177,7 @@ class PackageSetTests(unittest.TestCase):
             self.pack(i, **kwargs)
 
     def check(self):
-        rv.check_packages(self.out, self.IDS, "11.0.0-rc.1", "net11.0")
+        rv.check_packages(self.out, self.IDS, "11.0.0", "net11.0")
 
     def test_complete_set_passes(self):
         self.full_set()
@@ -194,8 +199,8 @@ class PackageSetTests(unittest.TestCase):
         with self.assertRaises(rv.ReleaseError):
             self.check()
         self.pack("Pkg.B")
-        (self.out / "Pkg.B.11.0.0-rc.1.nupkg").unlink()
-        with zipfile.ZipFile(self.out / "Pkg.B.11.0.0-rc.1.nupkg", "w") as z:
+        (self.out / "Pkg.B.11.0.0.nupkg").unlink()
+        with zipfile.ZipFile(self.out / "Pkg.B.11.0.0.nupkg", "w") as z:
             z.writestr("Pkg.B.nuspec", "<version>9.9.9</version>")
             z.writestr("lib/net11.0/x.dll", b"x")
             z.writestr("README.md", "r")
@@ -209,7 +214,7 @@ class PackageSetTests(unittest.TestCase):
         for _ in range(300):
             result = subprocess.run(
                 [sys.executable, str(SCRIPTS / "release_verify.py"), "packages", "--dir", str(self.out), "--expected", " ".join(self.IDS),
-                 "--version", "11.0.0-rc.1", "--tfm", "net11.0"], capture_output=True, text=True)
+                 "--version", "11.0.0", "--tfm", "net11.0"], capture_output=True, text=True)
             failures += result.returncode != 0
         self.assertEqual(0, failures)
 
@@ -236,6 +241,76 @@ class WorkflowHygieneTests(unittest.TestCase):
         self.assertIn("scripts/release_verify.py tag", text)
         self.assertIn("scripts/release_verify.py packages", text)
         self.assertNotIn('core="${version%%-*}"', text)
+
+
+    # Release-workflow structure (no YAML library in the standard library: the jobs and steps are split textually).
+    @staticmethod
+    def _jobs(text):
+        jobs, current = {}, None
+        for line in text.splitlines():
+            match = re.match(r"^  ([a-z][a-z-]*):\s*$", line)
+            if match and "jobs:" in text.split(line)[0]:
+                current = match.group(1)
+                jobs[current] = []
+            elif current is not None:
+                jobs[current].append(line)
+        return {name: "\n".join(lines) for name, lines in jobs.items()}
+
+    @staticmethod
+    def _steps(job):
+        return re.split(r"(?m)^      - ", job)[1:]
+
+    def test_no_job_downloads_packages_into_the_workspace_before_a_checkout(self):
+        # actions/checkout empties the workspace on a fresh runner: a download made before it into the workspace is wiped, the
+        # re-inspect then fails after the approval and the tag is burned. Download outside the workspace (runner.temp) or after it.
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text()
+        for name, job in self._jobs(text).items():
+            steps = self._steps(job)
+            for index, step in enumerate(steps):
+                if "actions/download-artifact@" not in step:
+                    continue
+                path = re.search(r"(?m)^\s+path:\s*(\S.*)$", step)
+                self.assertIsNotNone(path, f"{name}: download step without a path")
+                outside = path.group(1).startswith("${{ runner.temp }}")
+                checkout_later = any("actions/checkout@" in later for later in steps[index + 1:])
+                self.assertTrue(outside or not checkout_later, f"{name}: download into the workspace before a checkout")
+
+    def test_publish_scripts_come_from_the_resolved_sha_and_packages_from_runner_temp(self):
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text()
+        publish = self._jobs(text)["publish"]
+        self.assertIn("ref: ${{ needs.guard.outputs.sha }}", publish)
+        self.assertNotIn("refs/tags", publish)
+        self.assertIn("path: ${{ runner.temp }}/out", publish)
+        self.assertNotIn("out/*.nupkg\" --api-key", publish.replace("$RUNNER_TEMP/out/*.nupkg", ""))
+
+    def test_publish_runs_only_for_a_real_run_and_uses_the_standard_names(self):
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text()
+        publish = self._jobs(text)["publish"]
+        self.assertIn("if: needs.guard.outputs.dry_run == 'false'", publish)
+        self.assertIn("environment: nuget-stable", publish)
+        self.assertIn("vars.STABLE_PUBLISH_MODE", text)
+        self.assertIn("vars.NUGET_USER", publish)
+        for stale in ("RELEASE_APPROVAL_MODE", "nuget-release", "secrets.NUGET_USER", "NUGET_API_KEY: ${{ secrets"):
+            self.assertNotIn(stale, text)
+
+    def test_the_push_has_no_skip_duplicate(self):
+        # The not-published check is the guard: a silent skip would make a re-run of a release look green.
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text()
+        pushes = [line for line in text.splitlines() if "dotnet nuget push" in line]
+        self.assertEqual(1, len(pushes))
+        self.assertNotIn("--skip-duplicate", pushes[0])
+        self.assertIn("not-published", text)
+
+    def test_the_github_release_step_refuses_a_moved_tag(self):
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text()
+        release = self._jobs(text)["github-release"]
+        self.assertIn("git/ref/tags/${TAG}", release)
+        self.assertIn("while [ \"$type\" = \"tag\" ]", release)   # annotated tags are followed to a commit, however many levels
+        self.assertIn("git/tags/${resolved}", release)
+        self.assertIn("could not resolve tag", release)           # an empty answer fails
+        self.assertIn("could not dereference annotated tag", release)
+        self.assertIn("needs.guard.outputs.sha", release)
+        self.assertIn("now points at", release)
 
 
 if __name__ == "__main__":

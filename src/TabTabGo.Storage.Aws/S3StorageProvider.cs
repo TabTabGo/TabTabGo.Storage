@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
@@ -7,6 +9,7 @@ using Microsoft.Extensions.Options;
 using TabTabGo.Storage.ContentTypes;
 using TabTabGo.Storage.Exceptions;
 using TabTabGo.Storage.Models;
+using TabTabGo.Storage.Paths;
 
 namespace TabTabGo.Storage.Aws;
 
@@ -87,6 +90,12 @@ public class S3StorageProvider : StorageProvider, IDisposable
     {
         ArgumentNullException.ThrowIfNull(buffer);
         var ext = (extension ?? string.Empty).TrimStart('.');
+        if (ext.Length > 0 && !ext.All(char.IsAsciiLetterOrDigit))
+        {
+            throw new StorageException("The file extension is not valid.", ProviderName, "Store", container, null,
+                HttpStatusCode.BadRequest, code: "STORAGE_INVALID_PATH");
+        }
+
         var name = ext.Length == 0 ? Guid.NewGuid().ToString() : $"{Guid.NewGuid()}.{ext}";
         return StoreAsync(name, buffer, container);
     }
@@ -104,7 +113,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
         string container = "unknown", CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(content);
-        var relative = NormalizePath(ProviderName, "Store", container, filePath);
+        var relative = NormalizeKeyPath("Store", container, filePath);
         var key = Key("Store", container, relative);
         MemoryStream? buffered = null;
         try
@@ -160,7 +169,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
     /// <inheritdoc />
     public override async Task<Stream?> RetrieveAsync(string filePath, string container, CancellationToken ct)
     {
-        var relative = NormalizePath(ProviderName, "Retrieve", container, filePath);
+        var relative = NormalizeKeyPath("Retrieve", container, filePath);
         try
         {
             using var response = await Client.GetObjectAsync(RequestFor("Retrieve", container, relative), ct)
@@ -170,8 +179,9 @@ public class S3StorageProvider : StorageProvider, IDisposable
             memory.Position = 0;
             return memory;
         }
-        catch (AmazonS3Exception e) when (IsNotFound(e))
+        catch (AmazonS3Exception e) when (IsNotFound(e) || IsAccessDenied(e))
         {
+            LogForbiddenAsNotFound(e, "Retrieve", container, relative);
             return null;
         }
         catch (Exception e) when (IsUpstream(e))
@@ -184,15 +194,16 @@ public class S3StorageProvider : StorageProvider, IDisposable
     public override async Task<Stream?> OpenReadAsync(string filePath, string container = "unknown",
         CancellationToken ct = default)
     {
-        var relative = NormalizePath(ProviderName, "OpenRead", container, filePath);
+        var relative = NormalizeKeyPath("OpenRead", container, filePath);
         try
         {
             var response = await Client.GetObjectAsync(RequestFor("OpenRead", container, relative), ct)
                 .ConfigureAwait(false);
             return new S3ResponseStream(response);
         }
-        catch (AmazonS3Exception e) when (IsNotFound(e))
+        catch (AmazonS3Exception e) when (IsNotFound(e) || IsAccessDenied(e))
         {
+            LogForbiddenAsNotFound(e, "OpenRead", container, relative);
             return null;
         }
         catch (Exception e) when (IsUpstream(e))
@@ -205,7 +216,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
     public override async Task<bool> ExistsAsync(string filePath, string container = "unknown",
         CancellationToken ct = default)
     {
-        var relative = NormalizePath(ProviderName, "Exists", container, filePath);
+        var relative = NormalizeKeyPath("Exists", container, filePath);
         return await ExistsCoreAsync(Key("Exists", container, relative), container, relative, ct).ConfigureAwait(false);
     }
 
@@ -216,7 +227,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
     /// <inheritdoc />
     public override async Task DeleteAsync(string filePath, string container, CancellationToken ct)
     {
-        var relative = NormalizePath(ProviderName, "Delete", container, filePath);
+        var relative = NormalizeKeyPath("Delete", container, filePath);
         try
         {
             // S3 reports success for a missing key, so deletion is naturally idempotent.
@@ -256,7 +267,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
     {
         ArgumentNullException.ThrowIfNull(options);
         ct.ThrowIfCancellationRequested();
-        var relative = NormalizePath(ProviderName, "GetPublicUrl", container, filePath);
+        var relative = NormalizeKeyPath("GetPublicUrl", container, filePath);
         var expiry = options.GetEffectiveExpiry(TimeSpan.FromMinutes(Configuration.ExpirationMinutes));
         var request = new GetPreSignedUrlRequest
         {
@@ -304,6 +315,56 @@ public class S3StorageProvider : StorageProvider, IDisposable
     private static bool IsNotFound(AmazonS3Exception e) =>
         e.StatusCode == HttpStatusCode.NotFound || e.ErrorCode is "NoSuchKey" or "NotFound";
 
+    // S3 answers 403 for a missing key when the caller lacks s3:ListBucket. Only that case is reported as not found:
+    // a GET maps the error code AccessDenied (a KMS decrypt denial surfaces as AccessDenied too and is mapped as well);
+    // every other 403 code (InvalidAccessKeyId, SignatureDoesNotMatch, RequestTimeTooSkewed, InvalidObjectState, ...) is a fault.
+    private static bool IsAccessDenied(AmazonS3Exception e) =>
+        e.StatusCode == HttpStatusCode.Forbidden && e.ErrorCode == "AccessDenied";
+
+    // A HEAD answer has no body, so the SDK reports no S3 error code for it: any 403 is mapped except the explicit faults.
+    private static bool IsHeadForbidden(AmazonS3Exception e) =>
+        e.StatusCode == HttpStatusCode.Forbidden && e.ErrorCode is not (
+            "InvalidAccessKeyId" or "SignatureDoesNotMatch" or "RequestTimeTooSkewed" or "AccountProblem"
+            or "AllAccessDisabled" or "InvalidObjectState");
+
+    private static readonly EventId ReadForbiddenAsNotFoundEvent = new(4403, "S3ReadForbiddenAsNotFound");
+
+    private void LogForbiddenAsNotFound(AmazonS3Exception e, string operation, string container, string relative)
+    {
+        if (e.StatusCode != HttpStatusCode.Forbidden)
+        {
+            return;
+        }
+
+        // Never the path, key, bucket, credentials or URLs: a short hash of the normalised path lets operators correlate
+        // repeats without exposing a storage key.
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(relative)))[..12].ToLowerInvariant();
+        var extension = Path.GetExtension(relative).ToLowerInvariant();
+        if (extension.Length > 10 || !extension.TrimStart('.').All(char.IsAsciiLetterOrDigit))
+        {
+            extension = "(other)";
+        }
+
+        _logger?.LogWarning(ReadForbiddenAsNotFoundEvent,
+            "S3 read denied and reported as not found: provider {Provider}, operation {Operation}, container {Container}, " +
+            "extension {Extension}, path hash {PathHash}, error code {ErrorCode}, request id {RequestId}, status {StatusCode}",
+            ProviderName, operation, container, extension, hash, e.ErrorCode, e.RequestId, (int)HttpStatusCode.Forbidden);
+    }
+
+    // The key budget is 1024 UTF-8 bytes including "<container>/", so the container is normalised first (the key is built
+    // from the normalised name) and a container that leaves no room for a path is an invalid container, not an invalid path.
+    private static string NormalizeKeyPath(string operation, string? container, string? filePath)
+    {
+        var name = NormalizeContainer(ProviderName, operation, container);
+        if (Encoding.UTF8.GetByteCount(name) + 2 > 1024)
+        {
+            throw new StorageException("The storage container is not valid.", ProviderName, operation, container, null,
+                HttpStatusCode.BadRequest, code: "STORAGE_INVALID_CONTAINER");
+        }
+
+        return NormalizePath(ProviderName, operation, container, filePath, StoragePathLimits.S3ObjectKey(name));
+    }
+
     private static bool IsUpstream(Exception e) =>
         e is AmazonServiceException or AmazonClientException or HttpRequestException or IOException
             or TimeoutException;
@@ -326,8 +387,9 @@ public class S3StorageProvider : StorageProvider, IDisposable
                 .ConfigureAwait(false);
             return true;
         }
-        catch (AmazonS3Exception e) when (IsNotFound(e))
+        catch (AmazonS3Exception e) when (IsNotFound(e) || IsHeadForbidden(e))
         {
+            LogForbiddenAsNotFound(e, "Exists", container, relative);
             return false;
         }
         catch (Exception e) when (IsUpstream(e))

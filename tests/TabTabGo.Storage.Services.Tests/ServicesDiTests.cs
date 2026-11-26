@@ -258,8 +258,8 @@ public class ConsumerEntityTests : IDisposable
                 e.Property(f => f.UpdatedBy).IsRequired();
                 e.Property(f => f.ExtraProperties).HasConversion(
                     v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => System.Text.Json.JsonSerializer.Deserialize<IDictionary<string, object>>(v, (System.Text.Json.JsonSerializerOptions?)null)
-                         ?? new Dictionary<string, object>());
+                    v => System.Text.Json.JsonSerializer.Deserialize<IDictionary<string, object?>>(v, (System.Text.Json.JsonSerializerOptions?)null)
+                         ?? new Dictionary<string, object?>());
             });
     }
 }

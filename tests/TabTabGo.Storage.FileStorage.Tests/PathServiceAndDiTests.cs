@@ -87,6 +87,26 @@ public class PathServiceTests : IDisposable
     }
 
     [Fact]
+    public void PathService_RootInASiblingFolderWithTheWebRootAsPrefix_LogsNothing()
+    {
+        var logger = new FakeLogger<PathService>();
+
+        Create(new PathSettings { RootPath = "public-private" }, logger, Path.Combine(_temp.Path, "public"));
+
+        Assert.Empty(logger.Collector.GetSnapshot());
+    }
+
+    [Fact]
+    public void PathService_RootEqualToTheWebRoot_LogsWarning()
+    {
+        var logger = new FakeLogger<PathService>();
+
+        Create(new PathSettings { RootPath = "public" }, logger, Path.Combine(_temp.Path, "public"));
+
+        Assert.Single(logger.Collector.GetSnapshot());
+    }
+
+    [Fact]
     public void PathService_RootOutsideWebRoot_LogsNothing()
     {
         var logger = new FakeLogger<PathService>();

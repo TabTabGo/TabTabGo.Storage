@@ -309,8 +309,8 @@ public class FileServiceFullRestoreTests : IDisposable
                 e.Property(f => f.UpdatedBy).IsRequired();
                 e.Property(f => f.ExtraProperties).HasConversion(
                     v => System.Text.Json.JsonSerializer.Serialize(v, (System.Text.Json.JsonSerializerOptions?)null),
-                    v => System.Text.Json.JsonSerializer.Deserialize<IDictionary<string, object>>(v, (System.Text.Json.JsonSerializerOptions?)null)
-                         ?? new Dictionary<string, object>());
+                    v => System.Text.Json.JsonSerializer.Deserialize<IDictionary<string, object?>>(v, (System.Text.Json.JsonSerializerOptions?)null)
+                         ?? new Dictionary<string, object?>());
             });
         }
     }
@@ -420,7 +420,7 @@ public class FileServiceCreateGateTests : IDisposable
 
         var file = await h.Service.Upload(meta, FileServiceHarness.Text());
 
-        Assert.Equal("scanner", h.Reload(file.FileId).ExtraProperties["source"].ToString());
+        Assert.Equal("scanner", h.Reload(file.FileId).ExtraProperties["source"]!.ToString());
     }
 
     [Fact]
