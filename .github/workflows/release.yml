@@ -118,11 +118,10 @@ jobs:
           SHA: ${{ steps.resolve.outputs.sha }}
         run: |
           set -euo pipefail
-          # Tag format, target framework, releases/vM.m.x branch and the declared <Version> (compared with the FULL tag version) are
+          # Tag format, target framework, releases/vM.m.x branch and the declared <Version> (which must equal the tag version) are
           # checked by a script, not by pipelines: `x | grep -q` under pipefail fails at random with SIGPIPE.
           branches="$(git branch -r --contains "$SHA" | sed 's/^[* ]*//')"
           python3 scripts/release_verify.py tag "$TAG" --branches "$branches" >> "$GITHUB_OUTPUT"
-          version="${TAG#v}"
 
           if [ -n "${TabTabGoCoreVersion:-}" ]; then echo "::error::TabTabGoCoreVersion must not be set in a release run"; exit 1; fi
           core_range="$(grep -m1 -oE '<TabTabGoCoreVersion[^>]*>[^<]+' Directory.Packages.props | sed 's/.*>//')"
@@ -131,6 +130,7 @@ jobs:
             echo "::error::a -local Core version is the default; local feeds must not be released"; exit 1
           fi
           # Every PackageVersion line for TabTabGo.* must use the property (no hard-coded floating pin).
+          # shellcheck disable=SC2016  # the single-quoted $(...) is the literal MSBuild property text, not a shell expansion
           hardcoded="$(grep -E 'PackageVersion Include="TabTabGo\.' Directory.Packages.props | grep -v 'Version="\$(TabTabGoCoreVersion)"' || true)"
           if [ -n "$hardcoded" ]; then
             echo "::error::TabTabGo.* packages must take their version from TabTabGoCoreVersion"; exit 1
