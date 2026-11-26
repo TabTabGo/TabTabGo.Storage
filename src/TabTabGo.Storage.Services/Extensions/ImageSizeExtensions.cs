@@ -1,26 +1,34 @@
-﻿using System.Collections.Generic;
-using System.Drawing;
+﻿using System.Drawing;
+using System.Net;
+using Microsoft.Extensions.Logging;
 using TabTabGo.Core.Exceptions;
 using TabTabGo.Storage.Enums;
 
+namespace TabTabGo.Storage.Services;
+
+/// <summary>Maps <see cref="ImageSize"/> presets to pixel sizes.</summary>
 public static class ImageSizeExtensions
 {
-    private static Dictionary<ImageSize, Size> _sizePresets = new Dictionary<ImageSize, Size>
-        {
-                { ImageSize.Default, new Size() {Height = 1000, Width = 1800} },
-                { ImageSize.ThumbLarge, new Size() {Height = 180, Width = 180} },
-                { ImageSize.ThumbMedium, new Size() {Height = 160, Width = 160} },
-                { ImageSize.ThumbSmall, new Size() {Height = 120, Width = 120} },
-                //{ ImageSize.IconLarge, new Size() {Height = 64, Width = 64} },
-                //{ ImageSize.IconMedium, new Size() {Height = 32, Width = 32} },
-                //{ ImageSize.IconSmall, new Size() {Height = 16, Width = 16} }
-        };
+    private static readonly Dictionary<ImageSize, Size> SizePresets = new()
+    {
+        { ImageSize.Default, new Size { Height = 1000, Width = 1800 } },
+        { ImageSize.ThumbLarge, new Size { Height = 180, Width = 180 } },
+        { ImageSize.ThumbMedium, new Size { Height = 160, Width = 160 } },
+        { ImageSize.ThumbSmall, new Size { Height = 120, Width = 120 } },
+    };
 
+    /// <summary>Gets the pixel size of a preset.</summary>
+    /// <param name="sizeEnum">The preset.</param>
+    /// <returns>Width and height in pixels.</returns>
+    /// <exception cref="ApiException">The value is not a defined preset (400).</exception>
     public static Size GetSize(this ImageSize sizeEnum)
     {
-        if (_sizePresets.ContainsKey(sizeEnum))
-            return _sizePresets[sizeEnum];
-        else
-            throw new TTGException($"Image size {sizeEnum.ToString()} is not supported", code: "IMAGE_SIZE_NOT_SUPPORTED");
+        if (SizePresets.TryGetValue(sizeEnum, out var size))
+        {
+            return size;
+        }
+
+        throw new ApiException($"Image size {sizeEnum} is not supported", null, LogLevel.Warning, null,
+            HttpStatusCode.BadRequest, "IMAGE_SIZE_NOT_SUPPORTED");
     }
 }

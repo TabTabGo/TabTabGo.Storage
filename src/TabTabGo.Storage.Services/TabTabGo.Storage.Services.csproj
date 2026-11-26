@@ -1,36 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
-    <Version>$(VersionSuffix)</Version>
-    <Product>TabTabGo Storage WebApi</Product>
-    <Copyright>Copyright 2023</Copyright>
-    <PackageTags>Core</PackageTags>
-    <PackageReleaseNotes></PackageReleaseNotes>
-    <Company>TabTabGo</Company>
-    <Authors>TabTabGo</Authors>
-    <Description>Storage WebApi for TabTabGo</Description>
+    <Title>TabTabGo Storage Services</Title>
+    <Product>TabTabGo Storage Services</Product>
+    <Description>FileService, ImageService (SkiaSharp thumbnails) and dependency-injection setup for TabTabGo Storage.</Description>
+    <PackageTags>Storage;Files;Images;TabTabGo</PackageTags>
     <RootNamespace>TabTabGo.Storage.Services</RootNamespace>
-    <Nullable>enable</Nullable>
-    <PackageProjectUrl>https://github.com/TabTabGo/TabTabGo.Storage</PackageProjectUrl>
-    <PackageIcon>logo@32.png</PackageIcon>
-    <RepositoryUrl>https://github.com/TabTabGo/TabTabGo.Storage</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SkiaSharp" Version="2.80.3" />
-    <PackageReference Include="TabTabGo.Core.Services" Version="6.0.6.2" />
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
+    <PackageReference Include="TabTabGo.Core.Services" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
   </ItemGroup>
 
   <ItemGroup>
+    <!-- IFormFile adapter only; already implied by TabTabGo.Core.Services (OData). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="..\..\assets\logo@32.png">
-      <Pack>True</Pack>
-      <PackagePath></PackagePath>
-      <Link>logo@32.png</Link>
-    </None>
   </ItemGroup>
 
 </Project>

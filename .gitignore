@@ -250,3 +250,11 @@ paket-files/
 # JetBrains Rider
 .idea/
 *.sln.iml
+
+# Local-only build inputs (never commit)
+nuget.local.config
+artifacts/
+coverage/
+TestResults/
+__pycache__/
+*.pyc

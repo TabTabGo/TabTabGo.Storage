@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- https://learn.microsoft.com/en-us/dotnet/fundamentals/package-validation/diagnostic-ids -->
+<Suppressions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <!-- SB10: LightInject composition root removed; use AddTabTabGoFileStorage() -->
+  <Suppression>
+    <DiagnosticId>CP0001</DiagnosticId>
+    <Target>T:TabTabGo.Storage.FileStorage.FileCompositionRoot</Target>
+  </Suppression>
+  <!-- SB13: PathService takes IHostEnvironment instead of IHostingEnvironment -->
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:TabTabGo.Storage.FileStorage.Services.PathService.#ctor(Microsoft.AspNetCore.Hosting.IHostingEnvironment,Microsoft.Extensions.Options.IOptions{TabTabGo.Storage.Services.PathSettings},Microsoft.Extensions.Logging.ILogger{TabTabGo.Storage.FileStorage.Services.PathService})</Target>
+  </Suppression>
+</Suppressions>

@@ -1,39 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
-    <Version>$(VersionSuffix)</Version>
-
-    <Authors>TabTabGo</Authors>
-    <Company>TabTabGo</Company>
-    <Product>TabTabGo File System Storage</Product>
-    <Description>File System Storage implementation of TabTabGo Storage</Description>
-    <PackageProjectUrl>https://github.com/TabTabGo/TabTabGo.Storage</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/TabTabGo/TabTabGo.Storage</RepositoryUrl>
-    <Copyright>Copyright 2023</Copyright>
-    <PackageTags>Storage File</PackageTags>
-    <RootNamespace>TabTabGo.Storage.FileStorage</RootNamespace>
-    <Nullable>enable</Nullable>
-    <PackageIcon>logo@32.png</PackageIcon>
+    <Title>TabTabGo Storage File System</Title>
+    <Product>TabTabGo Storage File System</Product>
+    <Description>IStorageProvider implementation on the local file system with path-traversal protection.</Description>
+    <PackageTags>Storage;FileSystem;TabTabGo</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
-
-    <PackageReference Include="LightInject" Version="6.6.1" />
-
-    <PackageReference Include="Microsoft.AspNetCore.Hosting.Abstractions" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="..\..\assets\logo@32.png">
-      <Pack>True</Pack>
-      <PackagePath></PackagePath>
-      <Link>logo@32.png</Link>
-    </None>
   </ItemGroup>
 
 </Project>

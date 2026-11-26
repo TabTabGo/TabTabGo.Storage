@@ -1,36 +1,26 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFramework>net6.0</TargetFramework>
-        <Nullable>enable</Nullable>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <OutputType>Library</OutputType>
-        <Version>$(VersionSuffix)</Version>
-        <Title>Storage using AWS S3</Title>
-        <Authors>TabTabGo</Authors>
-        <Description>Implement IStorageProvider with AWS S3 service</Description>
-        <Copyright>TabTabGo 2023</Copyright>
-        <PackageProjectUrl>https://github.com/TabTabGo/TabTabGo.Storage</PackageProjectUrl>
-        <PackageIcon>logo@32.png</PackageIcon>
-        <RepositoryUrl>https://github.com/TabTabGo/TabTabGo.Storage</RepositoryUrl>
-        <PackageTags>Storage AWS</PackageTags>
-        <IsPackable>true</IsPackable>
-    </PropertyGroup>
+  <PropertyGroup>
+    <Title>TabTabGo Storage AWS S3</Title>
+    <Product>TabTabGo Storage AWS S3</Product>
+    <Description>IStorageProvider implementation on AWS S3 (AWS SDK for .NET v4).</Description>
+    <PackageTags>Storage;AWS;S3;TabTabGo</PackageTags>
+  </PropertyGroup>
 
-    <ItemGroup>
-      <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
-    </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.S3" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
 
-    <ItemGroup>
-      <PackageReference Include="AWSSDK.S3" Version="3.7.103.17" />
-    </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="TabTabGo.Storage.Aws.Tests" />
+  </ItemGroup>
 
-    <ItemGroup>
-      <None Include="..\..\assets\logo@32.png">
-        <Pack>True</Pack>
-        <PackagePath></PackagePath>
-        <Link>logo@32.png</Link>
-      </None>
-    </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TabTabGo.Storage\TabTabGo.Storage.csproj" />
+  </ItemGroup>
 
 </Project>

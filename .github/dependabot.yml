@@ -1,0 +1,29 @@
+version: 2
+
+# Updates target the feature integration branch of the line, never master or a release branch.
+# Add an entry per line (storage-net10, storage-net11) when that line's feature branch exists.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: features/storage-v8
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: nuget
+    directory: /
+    target-branch: features/storage-v8
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    ignore:
+      # The line is pinned to its .NET major: Microsoft.Extensions.*, EF Core and TabTabGo.Core follow it.
+      - dependency-name: "Microsoft.*"
+        update-types: ["version-update:semver-major"]
+      # Azure.Storage.Blobs 12.28+ forces Microsoft.Extensions.* and System.Text.Json 10.x onto net8.0; the v8 line stays on 12.27.x.
+      - dependency-name: "Azure.Storage.Blobs"
+        versions: [">=12.28.0"]
+      - dependency-name: "TabTabGo.*"
+        update-types: ["version-update:semver-major"]

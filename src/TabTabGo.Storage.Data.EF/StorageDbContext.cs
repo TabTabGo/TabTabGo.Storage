@@ -2,19 +2,19 @@
 
 namespace TabTabGo.Storage.Data.EF;
 
+/// <summary>A ready-made context that maps <see cref="Entities.File"/> through <see cref="StorageModelsBuilder"/>.</summary>
 public class StorageDbContext : DbContext
 {
+    /// <summary>Creates the context.</summary>
+    /// <param name="options">Context options.</param>
     public StorageDbContext(DbContextOptions options) : base(options)
     {
     }
 
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-    {
-        base.OnConfiguring(optionsBuilder);
-    }
-
+    /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        StorageModelsBuilder.OnModelCreating(modelBuilder);
     }
 }
