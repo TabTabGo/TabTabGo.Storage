@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to (re)build, for example v11.0.0-rc.1'
+        description: 'Existing tag to (re)build, for example v11.0.0'
         required: true
         type: string
       dry-run:
