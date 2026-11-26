@@ -5,7 +5,7 @@
     release_verify.py packages --dir out --expected "Id1 Id2" --version V --tfm net10.0
 
 Why a script and not shell: `unzip -l f | grep -q x` under `set -o pipefail` fails at random (SIGPIPE when grep -q exits early),
-and the old tag check stripped the pre-release suffix before comparing with <Version>, so a -rc tag could never pass. Here the
+and the old tag check stripped the pre-release suffix before comparing with <Version>, so a pre-release tag could never pass. Here the
 tag is compared with the FULL declared version, the releases/vM.m.x branch is derived from the numeric core only, and package
 contents are read with zipfile (no pipes).
 
@@ -30,7 +30,7 @@ class ReleaseError(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class Tag:
-    version: str      # the full version: 11.0.0-rc.1
+    version: str      # the full version: 11.2.3-beta.4
     core: str         # the numeric part: 11.0.0
     major: int
     minor: int
