@@ -1,7 +1,7 @@
 name: Release
 
 # Tag-driven publish to nuget.org. The file name is fixed: the nuget.org trusted-publishing policy pins it.
-# Nothing publishes on a push to a branch or on a pull request. A stable tag needs a manual approval.
+# Nothing publishes on a push to a branch or on a pull request. A release tag needs a manual approval.
 #
 # Security properties (do not weaken):
 #   * The tag is validated against a strict pattern BEFORE it is used anywhere, resolved only as refs/tags/<tag>,
@@ -48,7 +48,6 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
       sha: ${{ steps.resolve.outputs.sha }}
       version: ${{ steps.verify.outputs.version }}
-      prerelease: ${{ steps.verify.outputs.prerelease }}
       dry_run: ${{ steps.authorize.outputs.dry_run }}
     steps:
       - name: Authorize the run
@@ -84,9 +83,9 @@ jobs:
             if [ "$REF_TYPE" != "tag" ]; then echo "::error::not a tag ref"; exit 1; fi
             tag="$REF_NAME"
           fi
-          re='^v[0-9]+\.[0-9]+\.[0-9]+(-(rc|preview|alpha|beta)\.[0-9]+)?$'
+          re='^v[0-9]+\.[0-9]+\.[0-9]+$'
           if [[ "$tag" == *$'\n'* ]] || ! [[ "$tag" =~ $re ]]; then
-            echo "::error::tag does not match vMAJOR.MINOR.PATCH[-rc|preview|alpha|beta.N]"; exit 1
+            echo "::error::only stable vMAJOR.MINOR.PATCH tags are released (no pre-release suffix, no build metadata)"; exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
@@ -136,10 +135,9 @@ jobs:
           if [ -n "$hardcoded" ]; then
             echo "::error::TabTabGo.* packages must take their version from TabTabGoCoreVersion"; exit 1
           fi
-          prerelease=false
-          if [[ "$version" == *-* ]]; then prerelease=true; fi
-          if [ "$prerelease" = "false" ] && [[ "$core_range" =~ [0-9]+\.[0-9]+\.[0-9]+- ]]; then
-            echo "::error::a stable tag must not depend on a pre-release TabTabGo.Core"; exit 1
+          # Every release is stable (release_verify.py already refused any pre-release tag): so is the Core it depends on.
+          if [[ "$core_range" =~ [0-9]+\.[0-9]+\.[0-9]+- ]]; then
+            echo "::error::a release must not depend on a pre-release TabTabGo.Core"; exit 1
           fi
 
   build-test-pack:
@@ -209,15 +207,13 @@ jobs:
         run: python3 scripts/release_verify.py packages --dir out --expected "$EXPECTED_PACKAGES" --version "$VERSION"
 
       - name: Verify the RESOLVED Core dependency of every package
-        env:
-          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
         run: |
           set -euo pipefail
           # The default range as written in Directory.Packages.props; what was actually packed must be exactly that,
           # so a value injected through Directory.Build.props, a .rsp file or the environment cannot slip through.
           core_range="$(grep -m1 -oE '<TabTabGoCoreVersion[^>]*>[^<]+' Directory.Packages.props | sed 's/.*>//')"
-          if [ "$PRERELEASE" = "false" ] && ! [[ "$core_range" =~ ^\[[0-9]+\.[0-9]+\.[0-9]+,\ [0-9]+\.[0-9]+\.[0-9]+\)$ ]]; then
-            echo "::error::a stable tag needs a stable bounded Core range, found '$core_range'"; exit 1
+          if ! [[ "$core_range" =~ ^\[[0-9]+\.[0-9]+\.[0-9]+,\ [0-9]+\.[0-9]+\.[0-9]+\)$ ]]; then
+            echo "::error::a release needs a stable bounded Core range, found '$core_range'"; exit 1
           fi
           found=0
           for file in out/*.nupkg; do
@@ -245,8 +241,8 @@ jobs:
     if: needs.guard.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Stable tags wait for a required reviewer; pre-release tags do not (as in Core).
-    environment: ${{ needs.guard.outputs.prerelease == 'true' && 'nuget-prerelease' || 'nuget-release' }}
+    # Every release is stable and waits for a required reviewer in the nuget-release environment.
+    environment: nuget-release
     permissions:
       id-token: write
       contents: read
@@ -328,9 +324,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.guard.outputs.tag }}
-          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
         run: |
           set -euo pipefail
-          flags=(--verify-tag --generate-notes)
-          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
-          gh release create "$TAG" out/*.nupkg "${flags[@]}"
+          gh release create "$TAG" out/*.nupkg --verify-tag --generate-notes

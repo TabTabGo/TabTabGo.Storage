@@ -5,9 +5,8 @@
     release_verify.py packages --dir out --expected "Id1 Id2" --version V --tfm net10.0
 
 Why a script and not shell: `unzip -l f | grep -q x` under `set -o pipefail` fails at random (SIGPIPE when grep -q exits early),
-and the old tag check stripped the pre-release suffix before comparing with <Version>, so a pre-release tag could never pass. Here the
-tag is compared with the FULL declared version, the releases/vM.m.x branch is derived from the numeric core only, and package
-contents are read with zipfile (no pipes).
+and only stable vMAJOR.MINOR.PATCH tags are released: any pre-release suffix or build metadata is refused. The tag is compared
+with the declared <Version>, the releases/vM.m.x branch is derived from it, and package contents are read with zipfile (no pipes).
 
 Exit code 0 = ok; 1 = a check failed (the message is printed as a GitHub ::error::); with `tag`, GitHub step outputs are printed as
 key=value lines on stdout after the checks pass.
@@ -19,9 +18,12 @@ import re
 import sys
 import zipfile
 
-# ASCII digits only and no leading zeros: \d also matches other scripts' digits, and v010.0.0 / rc.01 are not canonical.
+# ASCII digits only and no leading zeros: \d also matches other scripts' digits, and v010.0.0 is not canonical.
 NUM = r"(0|[1-9][0-9]*)"
-TAG_RE = re.compile(rf"^v{NUM}\.{NUM}\.{NUM}(-(?:rc|preview|alpha|beta)\.{NUM})?$", re.ASCII)
+TAG_RE = re.compile(rf"^v{NUM}\.{NUM}\.{NUM}$", re.ASCII)
+# vN.N.N followed by a pre-release suffix (-...) or build metadata (+...): every release is stable, so these are refused by name.
+NOT_STABLE_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+[-+]", re.ASCII)
+STABLE_ONLY = "only stable vMAJOR.MINOR.PATCH tags are released (no pre-release suffix, no build metadata)"
 
 
 class ReleaseError(Exception):
@@ -30,20 +32,21 @@ class ReleaseError(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class Tag:
-    version: str      # the full version: 11.2.3-beta.4
-    core: str         # the numeric part: 11.0.0
+    version: str      # the version: 11.0.0
+    core: str         # the same numeric version
     major: int
     minor: int
-    prerelease: bool
 
 
 def parse_tag(tag: str) -> Tag:
     # fullmatch on a single line: `$` would accept a trailing newline
     match = TAG_RE.fullmatch(tag) if "\n" not in tag else None
     if match is None:
-        raise ReleaseError("tag does not match vMAJOR.MINOR.PATCH[-rc|preview|alpha|beta.N]")
-    major, minor, patch, suffix, _ = match.groups()
-    return Tag(version=tag[1:], core=f"{major}.{minor}.{patch}", major=int(major), minor=int(minor), prerelease=suffix is not None)
+        if "\n" not in tag and NOT_STABLE_RE.match(tag):
+            raise ReleaseError(STABLE_ONLY)
+        raise ReleaseError("tag does not match vMAJOR.MINOR.PATCH")
+    major, minor, patch = match.groups()
+    return Tag(version=tag[1:], core=f"{major}.{minor}.{patch}", major=int(major), minor=int(minor))
 
 
 def _property(props_text: str, name: str) -> str:
@@ -174,7 +177,6 @@ def main(argv=None) -> int:
         elif args.command == "tag":
             result = check_tag(args.tag, pathlib.Path(args.props).read_text(), args.branches)
             print(f"version={result.version}")
-            print(f"prerelease={'true' if result.prerelease else 'false'}")
         else:
             tfm = args.tfm or _property(pathlib.Path(args.props).read_text(), "TargetFramework")
             check_packages(pathlib.Path(args.dir), args.expected.split(), args.version, tfm)
