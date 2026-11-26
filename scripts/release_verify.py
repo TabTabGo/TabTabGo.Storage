@@ -130,7 +130,7 @@ def _status(url: str) -> int:
 
 
 def check_not_published(package_ids, version: str, status=_status) -> None:
-    """A re-run of a release must not look green because `dotnet nuget push --skip-duplicate` skipped what is already published."""
+    """Refuse a version that is already on nuget.org: a re-run of a release must fail, not silently skip what is already published."""
     for package_id in package_ids:
         lower = package_id.lower()
         url = f"https://api.nuget.org/v3-flatcontainer/{lower}/{version.lower()}/{lower}.nuspec"

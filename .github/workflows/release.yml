@@ -272,7 +272,7 @@ jobs:
           name: packages
           path: ${{ runner.temp }}/out
 
-      - name: Refuse a version that is already on nuget.org (--skip-duplicate would make a re-run look green)
+      - name: Refuse a version that is already on nuget.org (the push below has no --skip-duplicate, so this check is the guard)
         env:
           VERSION: ${{ needs.guard.outputs.version }}
         run: python3 scripts/release_verify.py not-published --dir "$RUNNER_TEMP/out" --version "$VERSION"
@@ -293,7 +293,7 @@ jobs:
       - name: Push to nuget.org (trusted publishing)
         env:
           NUGET_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
-        run: dotnet nuget push "$RUNNER_TEMP/out/*.nupkg" --api-key "$NUGET_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push "$RUNNER_TEMP/out/*.nupkg" --api-key "$NUGET_KEY" --source https://api.nuget.org/v3/index.json
 
   github-release:
     name: github-release
@@ -318,10 +318,18 @@ jobs:
           SHA: ${{ needs.guard.outputs.sha }}
         run: |
           set -euo pipefail
-          # The tag must still point at the commit that was built, tested and published (it could have been moved meanwhile).
-          read -r type object < <(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '[.object.type, .object.sha] | @tsv')
-          if [ "$type" = "tag" ]; then
-            object="$(gh api "repos/$GH_REPO/git/tags/$object" --jq '.object.sha')"
+          # A tag can be moved after the approval: resolve it again through the API (following annotated tags until a commit) and compare.
+          type="$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" --jq .object.type)"
+          resolved="$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" --jq .object.sha)"
+          [ -n "$type" ] && [ -n "$resolved" ] || { echo "::error::could not resolve tag ${TAG}"; exit 1; }
+          while [ "$type" = "tag" ]; do
+            next_type="$(gh api "repos/${GH_REPO}/git/tags/${resolved}" --jq .object.type)"
+            next_sha="$(gh api "repos/${GH_REPO}/git/tags/${resolved}" --jq .object.sha)"
+            [ -n "$next_type" ] && [ -n "$next_sha" ] || { echo "::error::could not dereference annotated tag ${TAG}"; exit 1; }
+            type="$next_type"
+            resolved="$next_sha"
+          done
+          if [ "$resolved" != "$SHA" ]; then
+            echo "::error::tag ${TAG} now points at ${resolved}, not at the published commit ${SHA}; no release is created"; exit 1
           fi
-          if [ "$object" != "$SHA" ]; then echo "::error::tag $TAG no longer points at the published commit"; exit 1; fi
           gh release create "$TAG" "$RUNNER_TEMP"/out/*.nupkg --verify-tag --generate-notes
