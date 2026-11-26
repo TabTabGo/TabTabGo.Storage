@@ -180,6 +180,8 @@ public class S3StorageProviderTests
         Assert.Equal("OpenRead", ex.Operation);
     }
 
+    // Defensive: a real HEAD answer never carries a specific code (the SDK reports "Forbidden"), so these codes only
+    // reach ExistsAsync from a mocked client; the guard keeps an explicit code from being mapped to not found.
     [Theory]
     [InlineData("InvalidAccessKeyId")]
     [InlineData("SignatureDoesNotMatch")]
@@ -187,7 +189,7 @@ public class S3StorageProviderTests
     [InlineData("AccountProblem")]
     [InlineData("AllAccessDisabled")]
     [InlineData("InvalidObjectState")]
-    public async Task Exists_403WithFaultCode_Throws(string code)
+    public async Task Exists_ExplicitFaultCode_Throws_Defensively(string code)
     {
         _s3.Client.Setup(c => c.GetObjectMetadataAsync(It.IsAny<GetObjectMetadataRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(S3Error(HttpStatusCode.Forbidden, code));

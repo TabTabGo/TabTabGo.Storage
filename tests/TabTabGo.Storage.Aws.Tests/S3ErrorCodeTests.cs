@@ -22,7 +22,7 @@ public sealed class S3ErrorCodeTests : IDisposable
     public S3ErrorCodeTests()
     {
         var port = FreePort();
-        _url = $"http://127.0.0.1:{port}/";
+        _url = $"http://localhost:{port}/";
         _listener.Prefixes.Add(_url);
         _listener.Start();
         _ = Task.Run(Serve);
