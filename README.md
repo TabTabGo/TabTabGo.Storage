@@ -219,7 +219,7 @@ published packages, SHA-256 pinned once 10.0.0 is published; locally `--baseline
 every suppression in `compat/` would have to cite its spec row, and there are none); `python3 scripts/mutation-check.py` re-introduces the registered bugs
 and proves a test kills each one; `Golden/capture/capture.py` re-captures the EF model golden files from the 6.0.8.4 sources.
 
-**Releasing.** `.github/workflows/release.yml` publishes only from a tag `vMAJOR.MINOR.PATCH` (all releases are stable; no pre-release tags are used) whose major
+**Releasing.** `.github/workflows/release.yml` publishes only from a tag `vMAJOR.MINOR.PATCH` (only stable tags are released: the guard refuses any pre-release suffix or build metadata) whose major
 equals the target framework major, whose commit is on `releases/vMAJOR.MINOR.x/*`, whose version equals
 `Directory.Build.props` `Version`, and (for a stable tag) whose Core dependency is stable. Stable releases wait for
 manual approval in the `nuget-release` environment; the repository variable `RELEASE_APPROVAL_MODE=environment`
