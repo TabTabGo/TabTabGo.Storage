@@ -58,7 +58,7 @@ var file = await fileService.Upload(new File { Title = "Invoice", FileType = Fil
 
 Every provider passes the same contract suite:
 
-- `RetrieveAsync` / `OpenReadAsync` return `null` only when the object does not exist; `RetrieveAsync` returns a
+- `RetrieveAsync` / `OpenReadAsync` return `null` only when the object does not exist (S3 also answers 403 for a missing key without `s3:ListBucket`, which is reported as not found with a warning log); `RetrieveAsync` returns a
   seekable stream at position 0.
 - `StoreAsync` returns the stored relative path and never `null`; it **overwrites** unless
   `StorageWriteOptions.Overwrite = false`.
@@ -67,7 +67,7 @@ Every provider passes the same contract suite:
   when overwrite is off, 502 for upstream failures). It carries provider, operation, container and path, never a
   credential or a signed URL.
 - Every path goes through `StoragePath.Normalize`: `\` becomes `/`, duplicate separators collapse; rooted, UNC and
-  drive paths, `.`/`..` segments, `:` and control characters are rejected.
+  drive paths, `.`/`..` segments, `:`, control characters and Unicode format characters (category Cf) are rejected, and over-long paths (file-system segment > 255 UTF-8 bytes, S3 key > 1024 UTF-8 bytes, Azure blob name > 1024 characters) are a 400 `STORAGE_INVALID_PATH`.
 
 ## Security notes
 
@@ -134,6 +134,9 @@ v10 only adds API relative to 8.0.0 (`python3 scripts/apicompat.py` proves it). 
 | SkiaSharp 4.154.0 (was 3.119.4) | none for callers (the ImageService tests assert dimensions, formats and EXIF orientation on 4.x) |
 | `Azure.Storage.Blobs` 12.30.1 (was 12.27.0) | none |
 | `Microsoft.Extensions.Hosting.Abstractions`, `Options`, `Logging.Abstractions` 10.0.14 | none |
+| **S3 403 on a read is "not found"** (owner decision, BL-2): `RetrieveAsync`, `OpenReadAsync` and `ExistsAsync` return `null` / `null` / `false` when S3 answers 403 (which it does for a missing key when the caller lacks `s3:ListBucket`), and log a warning with the provider, operation, container and normalised path (never a key prefix, credential or URL). Writes, deletes and signing still throw on 403. | grant the role `s3:ListBucket` on the bucket to tell a missing key from a real permission fault; alert on the warning log |
+| **Length limits on paths** (400 `STORAGE_INVALID_PATH`, not a 502): a file-system path segment is at most 255 UTF-8 bytes; an S3 object key is at most 1024 UTF-8 bytes including `<container>/`; an Azure blob name is at most 1024 characters | keep caller-chosen paths short; `FileService` GUID paths are far below the limits |
+| **Unicode format characters (category Cf, for example U+202E right-to-left override, U+200B zero-width space, U+00AD soft hyphen) are rejected** by `StoragePath` on every provider and in `InMemoryStorageProvider` (400 `STORAGE_INVALID_PATH`) | strip them from caller-supplied names |
 | Tests run on Microsoft.Testing.Platform: `dotnet test --solution TabTabGo.Storage.sln` | see Building |
 
 ## Upgrading from 6.x

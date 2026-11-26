@@ -9,7 +9,7 @@ namespace TabTabGo.Storage;
 /// <item><description><c>StoreAsync</c> returns the stored relative path and never <c>null</c>; it overwrites by default.</description></item>
 /// <item><description><c>DeleteAsync</c> is idempotent.</description></item>
 /// <item><description>Every other failure throws <see cref="Exceptions.StorageException"/>.</description></item>
-/// <item><description>Every path goes through <see cref="Paths.StoragePath.Normalize"/>.</description></item>
+/// <item><description>Every path goes through <see cref="Paths.StoragePath.Normalize(string)"/>.</description></item>
 /// </list>
 /// The members added after 6.x are default interface methods, so third-party implementations keep compiling.
 /// </summary>
