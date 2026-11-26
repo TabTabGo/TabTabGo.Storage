@@ -293,13 +293,24 @@ class WorkflowHygieneTests(unittest.TestCase):
         for stale in ("RELEASE_APPROVAL_MODE", "nuget-release", "secrets.NUGET_USER", "NUGET_API_KEY: ${{ secrets"):
             self.assertNotIn(stale, text)
 
+    def test_the_push_has_no_skip_duplicate(self):
+        # The not-published check is the guard: a silent skip would make a re-run of a release look green.
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text()
+        pushes = [line for line in text.splitlines() if "dotnet nuget push" in line]
+        self.assertEqual(1, len(pushes))
+        self.assertNotIn("--skip-duplicate", pushes[0])
+        self.assertIn("not-published", text)
+
     def test_the_github_release_step_refuses_a_moved_tag(self):
         text = (REPO / ".github" / "workflows" / "release.yml").read_text()
         release = self._jobs(text)["github-release"]
-        self.assertIn("git/ref/tags/$TAG", release)
-        self.assertIn("git/tags/", release)       # an annotated tag is dereferenced to its commit
+        self.assertIn("git/ref/tags/${TAG}", release)
+        self.assertIn("while [ \"$type\" = \"tag\" ]", release)   # annotated tags are followed to a commit, however many levels
+        self.assertIn("git/tags/${resolved}", release)
+        self.assertIn("could not resolve tag", release)           # an empty answer fails
+        self.assertIn("could not dereference annotated tag", release)
         self.assertIn("needs.guard.outputs.sha", release)
-        self.assertIn("no longer points at the published commit", release)
+        self.assertIn("now points at", release)
 
 
 if __name__ == "__main__":
