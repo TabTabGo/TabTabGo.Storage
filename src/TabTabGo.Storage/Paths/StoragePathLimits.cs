@@ -15,7 +15,7 @@ public sealed record StoragePathLimits(int MaxSegmentLength, int MaxLength, bool
     public static StoragePathLimits AzureBlobName { get; } = new(int.MaxValue, 1024, CountUtf8Bytes: false);
 
     /// <summary>S3 limit: an object key is at most 1024 UTF-8 bytes, the container prefix included.</summary>
-    /// <param name="container">Container (key prefix) the path will be stored under.</param>
+    /// <param name="container">Normalised container (key prefix) the path will be stored under.</param>
     /// <returns>Limits for the path relative to the container.</returns>
     public static StoragePathLimits S3ObjectKey(string? container) =>
         new(int.MaxValue, 1024 - System.Text.Encoding.UTF8.GetByteCount(container ?? string.Empty) - 1);
