@@ -102,10 +102,20 @@ public class S3StorageProviderTests
         Assert.Null(await Create().RetrieveAsync("dir//a.txt", "Text"));
 
         var record = Assert.Single(_logger.Collector.GetSnapshot(), r => r.Level == LogLevel.Warning);
+        Assert.Equal("S3ReadForbiddenAsNotFound", record.Id.Name);
         Assert.Contains("Retrieve", record.Message);
         Assert.Contains("S3", record.Message);
         Assert.Contains("Text", record.Message);
-        Assert.Contains("dir/a.txt", record.Message);
+        Assert.Contains(".txt", record.Message);
+        Assert.Contains("AccessDenied", record.Message);
+        // A 12-hex-char SHA-256 prefix of the normalised path "dir/a.txt".
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes("dir/a.txt")))[..12]
+            .ToLowerInvariant();
+        Assert.Contains(hash, record.Message);
+        // Never the path, key, bucket, credentials or URLs.
+        Assert.DoesNotContain("dir/a.txt", record.Message);
+        Assert.DoesNotContain("a.txt/", record.Message);
+        Assert.DoesNotContain("dir", record.Message);
         Assert.DoesNotContain(Bucket, record.Message);
         Assert.DoesNotContain("http", record.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -132,6 +142,114 @@ public class S3StorageProviderTests
 
         var record = Assert.Single(_logger.Collector.GetSnapshot(), r => r.Level == LogLevel.Warning);
         Assert.Contains("Exists", record.Message);
+    }
+
+    // A 403 with any other error code is a real fault, not a missing key.
+    [Theory]
+    [InlineData("InvalidAccessKeyId")]
+    [InlineData("SignatureDoesNotMatch")]
+    [InlineData("RequestTimeTooSkewed")]
+    [InlineData("AccountProblem")]
+    [InlineData("AllAccessDisabled")]
+    [InlineData("InvalidObjectState")]
+    public async Task Retrieve_403WithFaultCode_Throws(string code)
+    {
+        _s3.Client.Setup(c => c.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(S3Error(HttpStatusCode.Forbidden, code));
+
+        var ex = await Assert.ThrowsAsync<StorageException>(() => Create().RetrieveAsync("a.txt", "Text"));
+
+        Assert.Equal("Retrieve", ex.Operation);
+        Assert.DoesNotContain(_logger.Collector.GetSnapshot(), r => r.Id.Name == "S3ReadForbiddenAsNotFound");
+    }
+
+    [Theory]
+    [InlineData("InvalidAccessKeyId")]
+    [InlineData("SignatureDoesNotMatch")]
+    [InlineData("RequestTimeTooSkewed")]
+    [InlineData("AccountProblem")]
+    [InlineData("AllAccessDisabled")]
+    [InlineData("InvalidObjectState")]
+    public async Task OpenRead_403WithFaultCode_Throws(string code)
+    {
+        _s3.Client.Setup(c => c.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(S3Error(HttpStatusCode.Forbidden, code));
+
+        var ex = await Assert.ThrowsAsync<StorageException>(() => Create().OpenReadAsync("a.txt", "Text"));
+
+        Assert.Equal("OpenRead", ex.Operation);
+    }
+
+    [Theory]
+    [InlineData("InvalidAccessKeyId")]
+    [InlineData("SignatureDoesNotMatch")]
+    [InlineData("RequestTimeTooSkewed")]
+    [InlineData("AccountProblem")]
+    [InlineData("AllAccessDisabled")]
+    [InlineData("InvalidObjectState")]
+    public async Task Exists_403WithFaultCode_Throws(string code)
+    {
+        _s3.Client.Setup(c => c.GetObjectMetadataAsync(It.IsAny<GetObjectMetadataRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(S3Error(HttpStatusCode.Forbidden, code));
+
+        var ex = await Assert.ThrowsAsync<StorageException>(() => Create().ExistsAsync("a.txt", "Text"));
+
+        Assert.Equal("Exists", ex.Operation);
+    }
+
+    // The SDK reports "Forbidden" (the status text) for the body-less answer to a HEAD.
+    [Fact]
+    public async Task Exists_HeadForbiddenCode_ReturnsFalse()
+    {
+        _s3.Client.Setup(c => c.GetObjectMetadataAsync(It.IsAny<GetObjectMetadataRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(S3Error(HttpStatusCode.Forbidden, "Forbidden"));
+
+        Assert.False(await Create().ExistsAsync("a.txt", "Text"));
+    }
+
+    [Fact]
+    public async Task Delete_AccessDenied_StillThrows()
+    {
+        _s3.Client.Setup(c => c.DeleteObjectAsync(It.IsAny<DeleteObjectRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(S3Error(HttpStatusCode.Forbidden, "AccessDenied"));
+
+        var ex = await Assert.ThrowsAsync<StorageException>(() => Create().DeleteAsync("a.txt", "Text"));
+
+        Assert.Equal("Delete", ex.Operation);
+    }
+
+    // The key budget uses the normalised container; one that leaves no room for a path is an invalid container.
+    [Theory]
+    [InlineData(1022, true)]    // "<1022 bytes>/x" is exactly 1024
+    [InlineData(1023, false)]
+    [InlineData(1024, false)]
+    [InlineData(2000, false)]
+    public async Task Store_ContainerLength_TooLongIsInvalidContainer(int containerBytes, bool accepted)
+    {
+        var container = new string('c', containerBytes);
+        var task = Create().StoreAsync("x", [1], container);
+
+        if (accepted)
+        {
+            Assert.Equal("x", await task);
+        }
+        else
+        {
+            var ex = await Assert.ThrowsAsync<StorageException>(() => task);
+            Assert.Equal("STORAGE_INVALID_CONTAINER", ex.ErrorCode);
+            Assert.Equal(HttpStatusCode.BadRequest, ex.HttpStatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Store_PathBudget_UsesTheNormalisedContainer()
+    {
+        // "Text/" normalises to "Text": the key is built from the normalised name, so the budget must follow it.
+        var container = "Text/";
+        var path = new string('a', 1024 - "Text".Length - 1);
+
+        Assert.Equal(path, await Create().StoreAsync(path, [1], container));
+        Assert.Equal(1024, _s3.PutRequests.Single().Key.Length);
     }
 
     [Fact]
