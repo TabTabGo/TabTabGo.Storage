@@ -28,7 +28,7 @@ class TagTests(unittest.TestCase):
     CASES = [
         ("v8.0.0", "net8.0", "8.0.0", "releases/v8.0.x/v8.0.0", "8.0.0", False),
         ("v10.0.0", "net10.0", "10.0.0", "releases/v10.0.x/v10.0.0", "10.0.0", False),
-        ("v11.0.0-rc.1", "net11.0", "11.0.0-rc.1", "releases/v11.0.x/v11.0.0-rc.1", "11.0.0-rc.1", True),
+        ("v11.0.0-beta.1", "net11.0", "11.0.0-beta.1", "releases/v11.0.x/v11.0.0-beta.1", "11.0.0-beta.1", True),
         ("v11.0.0", "net11.0", "11.0.0", "releases/v11.0.x/v11.0.0", "11.0.0", False),
         ("v11.2.3-beta.4", "net11.0", "11.2.3-beta.4", "releases/v11.2.x/v11.2.3", "11.2.3-beta.4", True),
     ]
@@ -41,26 +41,26 @@ class TagTests(unittest.TestCase):
                 self.assertEqual(prerelease, result.prerelease)
 
     def test_the_declared_version_is_compared_with_the_full_tag_version(self):
-        # Regression: the suffix used to be stripped from the tag, so neither -rc.1 nor the stable tag could match a -rc.1 Version.
+        # Regression: the suffix used to be stripped from the tag, so neither -beta.1 nor the stable tag could match a -beta.1 Version.
         with self.assertRaises(rv.ReleaseError):
-            rv.check_tag("v11.0.0", props("net11.0", "11.0.0-rc.1"), branches("releases/v11.0.x/v11.0.0"))
+            rv.check_tag("v11.0.0", props("net11.0", "11.0.0-beta.1"), branches("releases/v11.0.x/v11.0.0"))
         with self.assertRaises(rv.ReleaseError):
-            rv.check_tag("v11.0.0-rc.1", props("net11.0", "11.0.0"), branches("releases/v11.0.x/v11.0.0-rc.1"))
+            rv.check_tag("v11.0.0-beta.1", props("net11.0", "11.0.0"), branches("releases/v11.0.x/v11.0.0-beta.1"))
         with self.assertRaises(rv.ReleaseError):
-            rv.check_tag("v11.0.0-rc.2", props("net11.0", "11.0.0-rc.1"), branches("releases/v11.0.x/v11.0.0-rc.1"))
+            rv.check_tag("v11.0.0-beta.2", props("net11.0", "11.0.0-beta.1"), branches("releases/v11.0.x/v11.0.0-beta.1"))
 
     def test_target_framework_major_must_match_the_tag_major(self):
         with self.assertRaises(rv.ReleaseError):
             rv.check_tag("v10.0.0", props("net8.0", "10.0.0"), branches("releases/v10.0.x/v10.0.0"))
         with self.assertRaises(rv.ReleaseError):
-            rv.check_tag("v11.0.0-rc.1", props("net10.0", "11.0.0-rc.1"), branches("releases/v11.0.x/v11.0.0-rc.1"))
+            rv.check_tag("v11.0.0-beta.1", props("net10.0", "11.0.0-beta.1"), branches("releases/v11.0.x/v11.0.0-beta.1"))
 
     def test_the_commit_must_be_on_a_release_branch_of_the_same_major_minor(self):
         for bad in ("releases/v10.0.x/v10.0.0", "releases/v11.1.x/v11.1.0", "feature/x", "main"):
             with self.subTest(branch=bad), self.assertRaises(rv.ReleaseError):
-                rv.check_tag("v11.0.0-rc.1", props("net11.0", "11.0.0-rc.1"), branches(bad))
+                rv.check_tag("v11.0.0-beta.1", props("net11.0", "11.0.0-beta.1"), branches(bad))
         # the branch is derived from the core part: the suffix never takes part
-        rv.check_tag("v11.0.0-rc.1", props("net11.0", "11.0.0-rc.1"), branches("releases/v11.0.x/v11.0.0"))
+        rv.check_tag("v11.0.0-beta.1", props("net11.0", "11.0.0-beta.1"), branches("releases/v11.0.x/v11.0.0"))
 
     def test_malformed_tags_are_refused(self):
         for tag in ("v11.0", "11.0.0", "v1.2.3-rc", "v1.2.3-gamma.1", "v1.2.3\nextra", "v1.2.3 ", "v1.2.3-rc.1-x", ""):
@@ -158,7 +158,7 @@ class PackageSetTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def pack(self, package_id, version="11.0.0-rc.1", tfm="net11.0", readme=True, symbols=True):
+    def pack(self, package_id, version="11.0.0-beta.1", tfm="net11.0", readme=True, symbols=True):
         with zipfile.ZipFile(self.out / f"{package_id}.{version}.nupkg", "w") as z:
             z.writestr(f"{package_id}.nuspec", f"<package><metadata><version>{version}</version></metadata></package>")
             z.writestr(f"lib/{tfm}/{package_id}.dll", b"x")
@@ -172,7 +172,7 @@ class PackageSetTests(unittest.TestCase):
             self.pack(i, **kwargs)
 
     def check(self):
-        rv.check_packages(self.out, self.IDS, "11.0.0-rc.1", "net11.0")
+        rv.check_packages(self.out, self.IDS, "11.0.0-beta.1", "net11.0")
 
     def test_complete_set_passes(self):
         self.full_set()
@@ -194,8 +194,8 @@ class PackageSetTests(unittest.TestCase):
         with self.assertRaises(rv.ReleaseError):
             self.check()
         self.pack("Pkg.B")
-        (self.out / "Pkg.B.11.0.0-rc.1.nupkg").unlink()
-        with zipfile.ZipFile(self.out / "Pkg.B.11.0.0-rc.1.nupkg", "w") as z:
+        (self.out / "Pkg.B.11.0.0-beta.1.nupkg").unlink()
+        with zipfile.ZipFile(self.out / "Pkg.B.11.0.0-beta.1.nupkg", "w") as z:
             z.writestr("Pkg.B.nuspec", "<version>9.9.9</version>")
             z.writestr("lib/net11.0/x.dll", b"x")
             z.writestr("README.md", "r")
@@ -209,7 +209,7 @@ class PackageSetTests(unittest.TestCase):
         for _ in range(300):
             result = subprocess.run(
                 [sys.executable, str(SCRIPTS / "release_verify.py"), "packages", "--dir", str(self.out), "--expected", " ".join(self.IDS),
-                 "--version", "11.0.0-rc.1", "--tfm", "net11.0"], capture_output=True, text=True)
+                 "--version", "11.0.0-beta.1", "--tfm", "net11.0"], capture_output=True, text=True)
             failures += result.returncode != 0
         self.assertEqual(0, failures)
 
