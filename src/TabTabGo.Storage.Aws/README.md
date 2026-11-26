@@ -26,8 +26,14 @@ Every `AWSSDK.*` package in your application must be on 4.x (one `AWSSDK.Core` m
 - A presigned URL is served by S3 without our headers (no `X-Content-Type-Options: nosniff`): the response type is always
   the type of the object's own extension and `text/plain` is never inline.
 - A forward-only stream for large objects: `OpenReadAsync`.
-- A 403 on `RetrieveAsync` / `OpenReadAsync` / `ExistsAsync` is reported as not found (`null` / `null` / `false`) with a warning log
-  (provider, operation, container, normalised path; never credentials or URLs): S3 answers 403 for a missing key when the caller
-  lacks `s3:ListBucket`. Grant `s3:ListBucket` to tell the two apart. Writes, deletes and signing still throw on 403.
+- A 403 on a read is reported as not found (owner decision, BL-2), because S3 answers 403 for a missing key when the caller
+  lacks `s3:ListBucket`: `RetrieveAsync` / `OpenReadAsync` return `null` when the error code is `AccessDenied` (a KMS decrypt
+  denial is `AccessDenied` too and is mapped as well), and `ExistsAsync` returns `false` on a 403 HEAD (no body: the SDK
+  reports the code `Forbidden`). `InvalidAccessKeyId`, `SignatureDoesNotMatch`, `RequestTimeTooSkewed`, `AccountProblem`,
+  `AllAccessDisabled` and `InvalidObjectState` still throw, as do writes, deletes and signing.
+- The mapping logs a warning with the event id `S3ReadForbiddenAsNotFound`: provider, operation, container, file extension,
+  a 12-hex-character SHA-256 prefix of the normalised path, the S3 error code, the request id and the status. Never the path,
+  key, bucket, credentials or URLs. **Ops:** alert on the event id; without `s3:ListBucket` every legitimate miss also logs it.
+  The warning goes through the injected logger (the unsupported parameterless constructor throws).
 - An object key (`<container>/<path>`) is at most 1024 UTF-8 bytes; a longer path is a 400 `STORAGE_INVALID_PATH`.
 - Tests: `S3StorageProvider` takes an `IAmazonS3`, so mock it, or run LocalStack through Testcontainers.

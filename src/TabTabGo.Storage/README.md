@@ -30,7 +30,7 @@ StoragePath.Normalize(path, StoragePathLimits.FileSystem); // also enforces a pr
 ```
 
 `StoragePathLimits` carries the limits a provider adds: `FileSystem` (segment <= 255 UTF-8 bytes), `AzureBlobName`
-(<= 1024 characters) and `S3ObjectKey(container)` (<= 1024 UTF-8 bytes including `<container>/`). An over-long path is
+(<= 1024 characters) and `S3ObjectKey(container)` (<= 1024 UTF-8 bytes including `<container>/`; pass the normalised container name, as `S3StorageProvider` does). An over-long path is
 an `ArgumentException` here and a 400 `STORAGE_INVALID_PATH` `StorageException` from the providers. Provider authors call
 `NormalizePath(provider, operation, container, path, limits)`.
 
