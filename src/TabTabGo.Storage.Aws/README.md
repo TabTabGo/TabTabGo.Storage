@@ -26,4 +26,8 @@ Every `AWSSDK.*` package in your application must be on 4.x (one `AWSSDK.Core` m
 - A presigned URL is served by S3 without our headers (no `X-Content-Type-Options: nosniff`): the response type is always
   the type of the object's own extension and `text/plain` is never inline.
 - A forward-only stream for large objects: `OpenReadAsync`.
+- A 403 on `RetrieveAsync` / `OpenReadAsync` / `ExistsAsync` is reported as not found (`null` / `null` / `false`) with a warning log
+  (provider, operation, container, normalised path; never credentials or URLs): S3 answers 403 for a missing key when the caller
+  lacks `s3:ListBucket`. Grant `s3:ListBucket` to tell the two apart. Writes, deletes and signing still throw on 403.
+- An object key (`<container>/<path>`) is at most 1024 UTF-8 bytes; a longer path is a 400 `STORAGE_INVALID_PATH`.
 - Tests: `S3StorageProvider` takes an `IAmazonS3`, so mock it, or run LocalStack through Testcontainers.

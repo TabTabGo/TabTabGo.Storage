@@ -33,3 +33,5 @@ Options are validated at startup: a connection string, or `ServiceUri` together 
 - A SAS URL is served by Azure without our headers (no `nosniff`), so the response type is always the object's own
   extension type and `text/plain` is never inline.
 - Tests: mock `BlobServiceClient`/`BlobClient` (they are mockable), or run Azurite through Testcontainers.
+
+A blob name (the path) is at most 1024 characters; a longer path is a 400 `STORAGE_INVALID_PATH`.

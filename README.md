@@ -56,7 +56,7 @@ var file = await fileService.Upload(new File { Title = "Invoice", FileType = Fil
 
 Every provider passes the same contract suite:
 
-- `RetrieveAsync` / `OpenReadAsync` return `null` only when the object does not exist; `RetrieveAsync` returns a
+- `RetrieveAsync` / `OpenReadAsync` return `null` only when the object does not exist (S3 also answers 403 for a missing key without `s3:ListBucket`, which is reported as not found with a warning log); `RetrieveAsync` returns a
   seekable stream at position 0.
 - `StoreAsync` returns the stored relative path and never `null`; it **overwrites** unless
   `StorageWriteOptions.Overwrite = false`.
@@ -65,7 +65,7 @@ Every provider passes the same contract suite:
   when overwrite is off, 502 for upstream failures). It carries provider, operation, container and path, never a
   credential or a signed URL.
 - Every path goes through `StoragePath.Normalize`: `\` becomes `/`, duplicate separators collapse; rooted, UNC and
-  drive paths, `.`/`..` segments, `:` and control characters are rejected.
+  drive paths, `.`/`..` segments, `:`, control characters and Unicode format characters (category Cf) are rejected, and over-long paths (file-system segment > 255 UTF-8 bytes, S3 key > 1024 UTF-8 bytes, Azure blob name > 1024 characters) are a 400 `STORAGE_INVALID_PATH`.
 
 ## Security notes
 
@@ -123,6 +123,9 @@ Every provider passes the same contract suite:
 | A whole-entity `Update` keeps the stored value when the incoming `ReferenceId` / `Duration` (like `Title`, `Comment`, `ReferenceType`) is null (spec SB45); a consumer entity with a non-nullable `ReferenceId` always copies it | clear a value with a JSON patch (`Update(id, JsonObject)`) |
 | The list filter converts `ReferenceType` / `ReferenceId` to the consumer entity's member type (string or enum, `long` or `long?`); an unknown enum name is 400 `FILTER_NOT_SUPPORTED` instead of a 500 (spec SB44) | none; query with a defined enum name |
 | The obsolete `GetPublicPath(..., expiryDays)` **ignores `expiryDays`** on S3 and Azure and uses the provider default lifetime (S3 `ExpirationMinutes`, default 60; Azure `DefaultSasExpiry`, default 1 hour) (spec SB25) | call `GetPublicUrlAsync` with `PublicUrlOptions.ExpiresIn` when the lifetime matters |
+| **S3 403 on a read is "not found"** (owner decision, BL-2): `RetrieveAsync`, `OpenReadAsync` and `ExistsAsync` return `null` / `null` / `false` when S3 answers 403 (which it does for a missing key when the caller lacks `s3:ListBucket`), and log a warning with the provider, operation, container and normalised path (never a key prefix, credential or URL). Writes, deletes and signing still throw on 403. | grant the role `s3:ListBucket` on the bucket to tell a missing key from a real permission fault; alert on the warning log |
+| **Length limits on paths** (400 `STORAGE_INVALID_PATH`, not a 502): a file-system path segment is at most 255 UTF-8 bytes; an S3 object key is at most 1024 UTF-8 bytes including `<container>/`; an Azure blob name is at most 1024 characters | keep caller-chosen paths short; `FileService` GUID paths are far below the limits |
+| **Unicode format characters (category Cf, for example U+202E right-to-left override, U+200B zero-width space, U+00AD soft hyphen) are rejected** by `StoragePath` on every provider and in `InMemoryStorageProvider` (400 `STORAGE_INVALID_PATH`) | strip them from caller-supplied names |
 | `FileService.Update(long, JObject)` (Newtonsoft) became `Update(long, JsonObject)` (System.Text.Json), Core 8 API | switch the argument type |
 | `IPathService.PathSettings { get; }` is a new abstract member | custom `IPathService` implementers must add it |
 | `FileService.PostCreate` / `GetImage` signatures changed (`CancellationToken`, nullable, `FileResult` is `IAsyncDisposable`) | recompile overrides and dispose the result |

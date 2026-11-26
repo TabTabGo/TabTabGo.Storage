@@ -37,6 +37,53 @@ public class BlobStorageProviderTests
         return new BlobStorageProvider(_azure.Service.Object, Options.Create(options), _logger);
     }
 
+    // L1: an Azure blob name is at most 1024 characters.
+    [Theory]
+    [InlineData(1024, true)]
+    [InlineData(1025, false)]
+    public async Task Store_BlobNameLength_BoundaryAt1024Characters(int length, bool accepted)
+    {
+        var path = new string('a', length);
+        var task = Create().StoreAsync(path, [1], "Text");
+
+        if (accepted)
+        {
+            Assert.Equal(path, await task);
+        }
+        else
+        {
+            var ex = await Assert.ThrowsAsync<StorageException>(() => task);
+            Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+            Assert.Equal(HttpStatusCode.BadRequest, ex.HttpStatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Store_BlobNameLength_CountsCharactersNotBytes()
+    {
+        var path = new string('\u00e9', 1024);
+
+        Assert.Equal(path, await Create().StoreAsync(path, [1], "Text"));
+    }
+
+    [Fact]
+    public async Task Retrieve_OverLongBlobName_Is400_NotUpstream()
+    {
+        var ex = await Assert.ThrowsAsync<StorageException>(() => Create().RetrieveAsync(new string('a', 2000), "Text"));
+
+        Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("a\u202eb.txt")]
+    [InlineData("a\u200bb.txt")]
+    public async Task Store_UnicodeFormatCharacter_Rejected(string path)
+    {
+        var ex = await Assert.ThrowsAsync<StorageException>(() => Create().StoreAsync(path, [1], "Text"));
+
+        Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+    }
+
     private static byte[] Bytes(string text) => Encoding.UTF8.GetBytes(text);
 
     // Z-1
