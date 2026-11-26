@@ -76,4 +76,86 @@ public class StoragePathTests
     [InlineData(null, false)]
     public void IsSafe_ReportsNormalizeOutcome(string? input, bool expected) =>
         Assert.Equal(expected, StoragePath.IsSafe(input));
+
+    // Unicode format characters (category Cf) are rejected.
+    [Theory]
+    [InlineData("a\u202eb.txt")]      // right-to-left override
+    [InlineData("a/\u200bb")]          // zero-width space
+    [InlineData("\u200fa")]            // right-to-left mark
+    [InlineData("a\u00adb")]           // soft hyphen
+    [InlineData("a\ufeffb")]           // BOM / zero-width no-break space
+    [InlineData("a\U000e0001b")]       // language tag (supplementary plane, surrogate pair)
+    public void Normalize_UnicodeFormatCharacter_Throws(string input)
+    {
+        Assert.Throws<ArgumentException>(() => StoragePath.Normalize(input));
+        Assert.False(StoragePath.IsSafe(input));
+        Assert.False(StoragePath.IsSafe(input, StoragePathLimits.FileSystem));
+    }
+
+    [Fact]
+    public void Normalize_NonFormatUnicode_Accepted() =>
+        Assert.Equal("caf\u00e9/\u65e5\u672c\u8a9e.txt", StoragePath.Normalize("caf\u00e9/\u65e5\u672c\u8a9e.txt"));
+
+    [Theory]
+    [InlineData(255, true)]
+    [InlineData(256, false)]
+    public void Normalize_FileSystemLimits_SegmentBoundary(int length, bool accepted)
+    {
+        var path = "dir/" + new string('a', length);
+
+        if (accepted)
+        {
+            Assert.Equal(path, StoragePath.Normalize(path, StoragePathLimits.FileSystem));
+        }
+        else
+        {
+            Assert.Throws<ArgumentException>(() => StoragePath.Normalize(path, StoragePathLimits.FileSystem));
+            Assert.False(StoragePath.IsSafe(path, StoragePathLimits.FileSystem));
+        }
+    }
+
+    [Fact]
+    public void Normalize_FileSystemLimits_CountsUtf8Bytes()
+    {
+        Assert.Equal(new string('\u00e9', 127), StoragePath.Normalize(new string('\u00e9', 127), StoragePathLimits.FileSystem));
+        Assert.Throws<ArgumentException>(() => StoragePath.Normalize(new string('\u00e9', 128), StoragePathLimits.FileSystem));
+    }
+
+    [Fact]
+    public void Normalize_FileSystemLimits_DoNotLimitTotalLength() =>
+        Assert.True(StoragePath.IsSafe(string.Join('/', Enumerable.Repeat(new string('a', 200), 10)), StoragePathLimits.FileSystem));
+
+    [Theory]
+    [InlineData(1024, true)]
+    [InlineData(1025, false)]
+    public void Normalize_AzureLimits_CountsCharacters(int length, bool accepted)
+    {
+        Assert.Equal(accepted, StoragePath.IsSafe(new string('a', length), StoragePathLimits.AzureBlobName));
+        Assert.Equal(accepted, StoragePath.IsSafe(new string('\u00e9', length), StoragePathLimits.AzureBlobName));
+    }
+
+    [Fact]
+    public void Normalize_AzureLimits_CountSeparators() =>
+        Assert.False(StoragePath.IsSafe(new string('a', 1021) + "/bcd", StoragePathLimits.AzureBlobName));
+
+    [Theory]
+    [InlineData("Text", 1019, true)]    // "Text/" + 1019 = 1024 bytes
+    [InlineData("Text", 1020, false)]
+    [InlineData("", 1023, true)]
+    [InlineData("", 1024, false)]
+    public void Normalize_S3Limits_ContainerPrefixCounts(string container, int length, bool accepted) =>
+        Assert.Equal(accepted, StoragePath.IsSafe(new string('a', length), StoragePathLimits.S3ObjectKey(container)));
+
+    [Fact]
+    public void S3ObjectKey_CountsUtf8BytesOfTheContainer() =>
+        Assert.False(StoragePath.IsSafe(new string('a', 1022), StoragePathLimits.S3ObjectKey("\u00e9")));
+
+    [Fact]
+    public void Normalize_WithLimits_StillAppliesSafetyRules()
+    {
+        Assert.Throws<ArgumentException>(() => StoragePath.Normalize("../x", StoragePathLimits.FileSystem));
+        Assert.Throws<ArgumentNullException>(() => StoragePath.Normalize("a", null!));
+        Assert.Throws<ArgumentNullException>(() => StoragePath.IsSafe("a", null!));
+        Assert.False(StoragePath.IsSafe(null, StoragePathLimits.FileSystem));
+    }
 }

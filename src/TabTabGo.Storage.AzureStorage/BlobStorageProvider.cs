@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using TabTabGo.Storage.ContentTypes;
 using TabTabGo.Storage.Exceptions;
 using TabTabGo.Storage.Models;
+using TabTabGo.Storage.Paths;
 
 namespace TabTabGo.Storage.AzureStorage;
 
@@ -296,7 +297,7 @@ public class BlobStorageProvider : StorageProvider
     private (BlobContainerClient Container, BlobClient Blob, string Relative) GetBlob(string operation, string container,
         string filePath)
     {
-        var relative = NormalizePath(ProviderName, operation, container, filePath);
+        var relative = NormalizePath(ProviderName, operation, container, filePath, StoragePathLimits.AzureBlobName);
 
         // Reject unsafe input first (traversal, nesting, control characters); only then map the logical name to Azure's rules.
         var safeContainer = NormalizeContainer(ProviderName, operation, container);

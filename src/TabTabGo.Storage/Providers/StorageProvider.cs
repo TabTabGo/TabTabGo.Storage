@@ -104,6 +104,30 @@ public abstract class StorageProvider : IStorageProvider
     }
 
     /// <summary>
+    /// Normalises an object path like <see cref="NormalizePath(string, string, string?, string?)"/> and also enforces
+    /// the provider's <paramref name="limits"/>; an over-long path is a 400 <see cref="StorageException"/>
+    /// (<c>STORAGE_INVALID_PATH</c>), not an upstream failure.
+    /// </summary>
+    /// <param name="provider">Provider name for the exception.</param>
+    /// <param name="operation">Operation name for the exception.</param>
+    /// <param name="container">Container for the exception.</param>
+    /// <param name="filePath">Path to normalise.</param>
+    /// <param name="limits">Length limits of the provider.</param>
+    /// <returns>The normalised relative path.</returns>
+    protected static string NormalizePath(string provider, string operation, string? container, string? filePath,
+        StoragePathLimits limits)
+    {
+        ArgumentNullException.ThrowIfNull(limits);
+        if (filePath is null || !StoragePath.IsSafe(filePath, limits))
+        {
+            throw new StorageException("The storage path is not valid.", provider, operation, container, null,
+                HttpStatusCode.BadRequest, code: "STORAGE_INVALID_PATH");
+        }
+
+        return StoragePath.Normalize(filePath, limits);
+    }
+
+    /// <summary>
     /// Validates a container name (a single, safe path segment), converting anything else into a 400
     /// <see cref="StorageException"/>.
     /// </summary>

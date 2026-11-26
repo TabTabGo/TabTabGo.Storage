@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using TabTabGo.Storage.ContentTypes;
 using TabTabGo.Storage.Exceptions;
 using TabTabGo.Storage.Models;
+using TabTabGo.Storage.Paths;
 
 namespace TabTabGo.Storage.Aws;
 
@@ -110,7 +111,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
         string container = "unknown", CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(content);
-        var relative = NormalizePath(ProviderName, "Store", container, filePath);
+        var relative = NormalizePath(ProviderName, "Store", container, filePath, StoragePathLimits.S3ObjectKey(container));
         var key = Key("Store", container, relative);
         MemoryStream? buffered = null;
         try
@@ -166,7 +167,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
     /// <inheritdoc />
     public override async Task<Stream?> RetrieveAsync(string filePath, string container, CancellationToken ct)
     {
-        var relative = NormalizePath(ProviderName, "Retrieve", container, filePath);
+        var relative = NormalizePath(ProviderName, "Retrieve", container, filePath, StoragePathLimits.S3ObjectKey(container));
         try
         {
             using var response = await Client.GetObjectAsync(RequestFor("Retrieve", container, relative), ct)
@@ -176,8 +177,9 @@ public class S3StorageProvider : StorageProvider, IDisposable
             memory.Position = 0;
             return memory;
         }
-        catch (AmazonS3Exception e) when (IsNotFound(e))
+        catch (AmazonS3Exception e) when (IsNotFound(e) || IsForbidden(e))
         {
+            LogForbiddenAsNotFound(e, "Retrieve", container, relative);
             return null;
         }
         catch (Exception e) when (IsUpstream(e))
@@ -190,15 +192,16 @@ public class S3StorageProvider : StorageProvider, IDisposable
     public override async Task<Stream?> OpenReadAsync(string filePath, string container = "unknown",
         CancellationToken ct = default)
     {
-        var relative = NormalizePath(ProviderName, "OpenRead", container, filePath);
+        var relative = NormalizePath(ProviderName, "OpenRead", container, filePath, StoragePathLimits.S3ObjectKey(container));
         try
         {
             var response = await Client.GetObjectAsync(RequestFor("OpenRead", container, relative), ct)
                 .ConfigureAwait(false);
             return new S3ResponseStream(response);
         }
-        catch (AmazonS3Exception e) when (IsNotFound(e))
+        catch (AmazonS3Exception e) when (IsNotFound(e) || IsForbidden(e))
         {
+            LogForbiddenAsNotFound(e, "OpenRead", container, relative);
             return null;
         }
         catch (Exception e) when (IsUpstream(e))
@@ -211,7 +214,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
     public override async Task<bool> ExistsAsync(string filePath, string container = "unknown",
         CancellationToken ct = default)
     {
-        var relative = NormalizePath(ProviderName, "Exists", container, filePath);
+        var relative = NormalizePath(ProviderName, "Exists", container, filePath, StoragePathLimits.S3ObjectKey(container));
         return await ExistsCoreAsync(Key("Exists", container, relative), container, relative, ct).ConfigureAwait(false);
     }
 
@@ -222,7 +225,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
     /// <inheritdoc />
     public override async Task DeleteAsync(string filePath, string container, CancellationToken ct)
     {
-        var relative = NormalizePath(ProviderName, "Delete", container, filePath);
+        var relative = NormalizePath(ProviderName, "Delete", container, filePath, StoragePathLimits.S3ObjectKey(container));
         try
         {
             // S3 reports success for a missing key, so deletion is naturally idempotent.
@@ -262,7 +265,7 @@ public class S3StorageProvider : StorageProvider, IDisposable
     {
         ArgumentNullException.ThrowIfNull(options);
         ct.ThrowIfCancellationRequested();
-        var relative = NormalizePath(ProviderName, "GetPublicUrl", container, filePath);
+        var relative = NormalizePath(ProviderName, "GetPublicUrl", container, filePath, StoragePathLimits.S3ObjectKey(container));
         var expiry = options.GetEffectiveExpiry(TimeSpan.FromMinutes(Configuration.ExpirationMinutes));
         var request = new GetPreSignedUrlRequest
         {
@@ -310,6 +313,23 @@ public class S3StorageProvider : StorageProvider, IDisposable
     private static bool IsNotFound(AmazonS3Exception e) =>
         e.StatusCode == HttpStatusCode.NotFound || e.ErrorCode is "NoSuchKey" or "NotFound";
 
+    // S3 answers 403 for a missing key when the caller lacks s3:ListBucket, so a read 403 is reported as not found.
+    private static bool IsForbidden(AmazonS3Exception e) => e.StatusCode == HttpStatusCode.Forbidden;
+
+    private void LogForbiddenAsNotFound(AmazonS3Exception e, string operation, string container, string relative)
+    {
+        if (!IsForbidden(e))
+        {
+            return;
+        }
+
+        // Provider, operation, container and the normalised relative path only: never keys, credentials or URLs.
+        _logger?.LogWarning(
+            "S3 {Operation} was denied (403) and is reported as not found: provider {Provider}, container {Container}, path {Path}. " +
+            "Grant s3:ListBucket to tell a missing key from a permission fault",
+            operation, ProviderName, container, relative);
+    }
+
     private static bool IsUpstream(Exception e) =>
         e is AmazonServiceException or AmazonClientException or HttpRequestException or IOException
             or TimeoutException;
@@ -332,8 +352,9 @@ public class S3StorageProvider : StorageProvider, IDisposable
                 .ConfigureAwait(false);
             return true;
         }
-        catch (AmazonS3Exception e) when (IsNotFound(e))
+        catch (AmazonS3Exception e) when (IsNotFound(e) || IsForbidden(e))
         {
+            LogForbiddenAsNotFound(e, "Exists", container, relative);
             return false;
         }
         catch (Exception e) when (IsUpstream(e))

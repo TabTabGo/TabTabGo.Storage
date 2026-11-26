@@ -92,11 +92,53 @@ public class S3StorageProviderTests
         Assert.Null(await Create().RetrieveAsync("none.txt", "Text"));
     }
 
+    // BL-2 (owner decision 2026-11-26): a 403 on a read is not found, with a warning log.
     [Fact]
-    public async Task Retrieve_AccessDenied_Throws()
+    public async Task Retrieve_AccessDenied_ReturnsNull_AndLogsWarning()
     {
         _s3.Client.Setup(c => c.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(S3Error(HttpStatusCode.Forbidden, "AccessDenied"));
+
+        Assert.Null(await Create().RetrieveAsync("dir//a.txt", "Text"));
+
+        var record = Assert.Single(_logger.Collector.GetSnapshot(), r => r.Level == LogLevel.Warning);
+        Assert.Contains("Retrieve", record.Message);
+        Assert.Contains("S3", record.Message);
+        Assert.Contains("Text", record.Message);
+        Assert.Contains("dir/a.txt", record.Message);
+        Assert.DoesNotContain(Bucket, record.Message);
+        Assert.DoesNotContain("http", record.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task OpenRead_AccessDenied_ReturnsNull_AndLogsWarning()
+    {
+        _s3.Client.Setup(c => c.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(S3Error(HttpStatusCode.Forbidden, "AccessDenied"));
+
+        Assert.Null(await Create().OpenReadAsync("a.txt", "Text"));
+
+        var record = Assert.Single(_logger.Collector.GetSnapshot(), r => r.Level == LogLevel.Warning);
+        Assert.Contains("OpenRead", record.Message);
+    }
+
+    [Fact]
+    public async Task Exists_AccessDenied_ReturnsFalse_AndLogsWarning()
+    {
+        _s3.Client.Setup(c => c.GetObjectMetadataAsync(It.IsAny<GetObjectMetadataRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(S3Error(HttpStatusCode.Forbidden, "AccessDenied"));
+
+        Assert.False(await Create().ExistsAsync("a.txt", "Text"));
+
+        var record = Assert.Single(_logger.Collector.GetSnapshot(), r => r.Level == LogLevel.Warning);
+        Assert.Contains("Exists", record.Message);
+    }
+
+    [Fact]
+    public async Task Retrieve_ServerError_StillThrows()
+    {
+        _s3.Client.Setup(c => c.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(S3Error(HttpStatusCode.InternalServerError, "InternalError"));
 
         var ex = await Assert.ThrowsAsync<StorageException>(() => Create().RetrieveAsync("a.txt", "Text"));
 
@@ -104,14 +146,72 @@ public class S3StorageProviderTests
     }
 
     [Fact]
-    public async Task OpenRead_AccessDenied_Throws_AndMissingIsNull()
+    public async Task Store_AccessDenied_StillThrows()
     {
-        var provider = Create();
-        Assert.Null(await provider.OpenReadAsync("none.txt", "Text"));
-        _s3.Client.Setup(c => c.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()))
+        _s3.Client.Setup(c => c.PutObjectAsync(It.IsAny<PutObjectRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(S3Error(HttpStatusCode.Forbidden, "AccessDenied"));
 
-        await Assert.ThrowsAsync<StorageException>(() => provider.OpenReadAsync("a.txt", "Text"));
+        await Assert.ThrowsAsync<StorageException>(() => Create().StoreAsync("a.txt", [1], "Text"));
+    }
+
+    [Fact]
+    public async Task Retrieve_Missing_DoesNotLogWarning()
+    {
+        Assert.Null(await Create().RetrieveAsync("none.txt", "Text"));
+
+        Assert.DoesNotContain(_logger.Collector.GetSnapshot(), r => r.Level == LogLevel.Warning);
+    }
+
+    // L1: S3 key limit is 1024 UTF-8 bytes including "<container>/".
+    [Theory]
+    [InlineData(1024 - 5, true)]   // "Text/" + 1019 = 1024
+    [InlineData(1024 - 4, false)]
+    public async Task Store_KeyLength_BoundaryAt1024Bytes(int pathLength, bool accepted)
+    {
+        var path = new string('a', pathLength);
+        var task = Create().StoreAsync(path, [1], "Text");
+
+        if (accepted)
+        {
+            Assert.Equal(path, await task);
+            Assert.Equal(1024, _s3.PutRequests.Single().Key.Length);
+        }
+        else
+        {
+            var ex = await Assert.ThrowsAsync<StorageException>(() => task);
+            Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+            Assert.Equal(HttpStatusCode.BadRequest, ex.HttpStatusCode);
+            Assert.Empty(_s3.Objects);
+        }
+    }
+
+    [Fact]
+    public async Task Store_KeyLength_CountsUtf8Bytes()
+    {
+        // 2 bytes per character: 511 chars + "Text/" = 1027 bytes.
+        var ex = await Assert.ThrowsAsync<StorageException>(
+            () => Create().StoreAsync(new string('\u00e9', 511), [1], "Text"));
+
+        Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Retrieve_OverLongKey_Is400_NotUpstream()
+    {
+        var ex = await Assert.ThrowsAsync<StorageException>(() => Create().RetrieveAsync(new string('a', 1100), "Text"));
+
+        Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+        _s3.Client.Verify(c => c.GetObjectAsync(It.IsAny<GetObjectRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("a\u202eb.txt")]
+    [InlineData("a\u200bb.txt")]
+    public async Task Store_UnicodeFormatCharacter_Rejected(string path)
+    {
+        var ex = await Assert.ThrowsAsync<StorageException>(() => Create().StoreAsync(path, [1], "Text"));
+
+        Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
     }
 
     [Fact]
@@ -307,7 +407,7 @@ public class S3StorageProviderTests
     public async Task Exists_UpstreamError_Throws()
     {
         _s3.Client.Setup(c => c.GetObjectMetadataAsync(It.IsAny<GetObjectMetadataRequest>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(S3Error(HttpStatusCode.Forbidden, "AccessDenied"));
+            .ThrowsAsync(S3Error(HttpStatusCode.InternalServerError, "InternalError"));
 
         await Assert.ThrowsAsync<StorageException>(() => Create().ExistsAsync("a.txt", "Text"));
     }
