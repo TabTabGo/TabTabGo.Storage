@@ -243,5 +243,64 @@ class WorkflowHygieneTests(unittest.TestCase):
         self.assertNotIn('core="${version%%-*}"', text)
 
 
+    # Release-workflow structure (no YAML library in the standard library: the jobs and steps are split textually).
+    @staticmethod
+    def _jobs(text):
+        jobs, current = {}, None
+        for line in text.splitlines():
+            match = re.match(r"^  ([a-z][a-z-]*):\s*$", line)
+            if match and "jobs:" in text.split(line)[0]:
+                current = match.group(1)
+                jobs[current] = []
+            elif current is not None:
+                jobs[current].append(line)
+        return {name: "\n".join(lines) for name, lines in jobs.items()}
+
+    @staticmethod
+    def _steps(job):
+        return re.split(r"(?m)^      - ", job)[1:]
+
+    def test_no_job_downloads_packages_into_the_workspace_before_a_checkout(self):
+        # actions/checkout empties the workspace on a fresh runner: a download made before it into the workspace is wiped, the
+        # re-inspect then fails after the approval and the tag is burned. Download outside the workspace (runner.temp) or after it.
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text()
+        for name, job in self._jobs(text).items():
+            steps = self._steps(job)
+            for index, step in enumerate(steps):
+                if "actions/download-artifact@" not in step:
+                    continue
+                path = re.search(r"(?m)^\s+path:\s*(\S.*)$", step)
+                self.assertIsNotNone(path, f"{name}: download step without a path")
+                outside = path.group(1).startswith("${{ runner.temp }}")
+                checkout_later = any("actions/checkout@" in later for later in steps[index + 1:])
+                self.assertTrue(outside or not checkout_later, f"{name}: download into the workspace before a checkout")
+
+    def test_publish_scripts_come_from_the_resolved_sha_and_packages_from_runner_temp(self):
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text()
+        publish = self._jobs(text)["publish"]
+        self.assertIn("ref: ${{ needs.guard.outputs.sha }}", publish)
+        self.assertNotIn("refs/tags", publish)
+        self.assertIn("path: ${{ runner.temp }}/out", publish)
+        self.assertNotIn("out/*.nupkg\" --api-key", publish.replace("$RUNNER_TEMP/out/*.nupkg", ""))
+
+    def test_publish_runs_only_for_a_real_run_and_uses_the_standard_names(self):
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text()
+        publish = self._jobs(text)["publish"]
+        self.assertIn("if: needs.guard.outputs.dry_run == 'false'", publish)
+        self.assertIn("environment: nuget-stable", publish)
+        self.assertIn("vars.STABLE_PUBLISH_MODE", text)
+        self.assertIn("vars.NUGET_USER", publish)
+        for stale in ("RELEASE_APPROVAL_MODE", "nuget-release", "secrets.NUGET_USER", "NUGET_API_KEY: ${{ secrets"):
+            self.assertNotIn(stale, text)
+
+    def test_the_github_release_step_refuses_a_moved_tag(self):
+        text = (REPO / ".github" / "workflows" / "release.yml").read_text()
+        release = self._jobs(text)["github-release"]
+        self.assertIn("git/ref/tags/$TAG", release)
+        self.assertIn("git/tags/", release)       # an annotated tag is dereferenced to its commit
+        self.assertIn("needs.guard.outputs.sha", release)
+        self.assertIn("no longer points at the published commit", release)
+
+
 if __name__ == "__main__":
     unittest.main()
