@@ -222,9 +222,11 @@ and proves a test kills each one; `Golden/capture/capture.py` re-captures the EF
 **Releasing.** `.github/workflows/release.yml` publishes only from a tag `vMAJOR.MINOR.PATCH` (only stable tags are released: the guard refuses any pre-release suffix or build metadata) whose major
 equals the target framework major, whose commit is on `releases/vMAJOR.MINOR.x/*`, whose version equals
 `Directory.Build.props` `Version`, and whose Core dependency is stable. Releases wait for
-manual approval in the `nuget-release` environment; the repository variable `RELEASE_APPROVAL_MODE=environment`
-must be set or the workflow refuses to publish. Publishing uses nuget.org trusted publishing (`NUGET_USER`) with an
-environment-scoped API key as the only fallback. CI (`ci.yml`) never publishes.
+manual approval in the `nuget-stable` environment; the repository variable `STABLE_PUBLISH_MODE=environment`
+must be set or the workflow refuses to publish. Publishing uses nuget.org trusted publishing only: the repository
+variable `NUGET_USER` (a variable, not a secret) names the trusted-publishing user, and there is no API-key fallback.
+The publish job takes its scripts from the exact commit the guard resolved and downloads the packages outside the
+workspace (`$RUNNER_TEMP/out`); the GitHub release step refuses a tag that moved. CI (`ci.yml`) never publishes.
 
 ## Accepted limits
 

@@ -9,8 +9,8 @@ name: Release
 #   * Inputs and context values reach shell steps only through env:, never interpolated into run:.
 #   * The release is not authorised by github.actor alone: a re-run keeps the original actor, so the
 #     triggering actor must equal the actor and run_attempt must be 1. A re-run needs a fresh dispatch.
-#   * Publishing fails closed: it requires the repository variable RELEASE_APPROVAL_MODE=environment, which attests
-#     that the protected `nuget-release` environment (required reviewers) is configured. Unset or any other value
+#   * Publishing fails closed: it requires the repository variable STABLE_PUBLISH_MODE=environment, which attests
+#     that the protected `nuget-stable` environment (required reviewers) is configured. Unset or any other value
 #     refuses to publish.
 #   * This workflow builds and tests the tagged commit itself; it never trusts or reuses an earlier CI run.
 on:
@@ -58,15 +58,15 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
           EVENT_NAME: ${{ github.event_name }}
           DISPATCH_DRY_RUN: ${{ inputs.dry-run }}
-          APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          PUBLISH_MODE: ${{ vars.STABLE_PUBLISH_MODE }}
         run: |
           set -euo pipefail
           if [ "$ACTOR" != "$TRIGGERING_ACTOR" ]; then echo "::error::triggering actor differs from actor (re-run by another user)"; exit 1; fi
           if [ "$RUN_ATTEMPT" != "1" ]; then echo "::error::re-runs are refused; dispatch a new run"; exit 1; fi
           dry=false
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DISPATCH_DRY_RUN" = "true" ]; then dry=true; fi
-          if [ "$dry" != "true" ] && [ "$APPROVAL_MODE" != "environment" ]; then
-            echo "::error::RELEASE_APPROVAL_MODE is not 'environment'; refusing to publish (fail closed)"; exit 1
+          if [ "$dry" != "true" ] && [ "$PUBLISH_MODE" != "environment" ]; then
+            echo "::error::STABLE_PUBLISH_MODE is not 'environment'; refusing to publish (fail closed)"; exit 1
           fi
           echo "dry_run=$dry" >> "$GITHUB_OUTPUT"
 
@@ -238,11 +238,11 @@ jobs:
   publish:
     name: publish
     needs: [guard, build-test-pack]
-    if: needs.guard.outputs.dry_run != 'true'
+    if: needs.guard.outputs.dry_run == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Every release is stable and waits for a required reviewer in the nuget-release environment.
-    environment: nuget-release
+    # Every release is stable and waits for a required reviewer in the nuget-stable environment.
+    environment: nuget-stable
     permissions:
       id-token: write
       contents: read
@@ -252,58 +252,48 @@ jobs:
           ACTOR: ${{ github.actor }}
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
-          APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          PUBLISH_MODE: ${{ vars.STABLE_PUBLISH_MODE }}
         run: |
           set -euo pipefail
-          [ "$ACTOR" = "$TRIGGERING_ACTOR" ] && [ "$RUN_ATTEMPT" = "1" ] && [ "$APPROVAL_MODE" = "environment" ]
+          [ "$ACTOR" = "$TRIGGERING_ACTOR" ] && [ "$RUN_ATTEMPT" = "1" ] && [ "$PUBLISH_MODE" = "environment" ]
 
+      # The scripts come from the exact commit the guard resolved (not from the tag name, which could move during the approval wait).
+      - name: Checkout the tagged commit (scripts only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      # Outside the workspace: actions/checkout empties the workspace on a fresh runner, so a download into it would be wiped.
       - name: Download packages
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packages
-          path: out
-
-      - name: Checkout the tag (scripts only)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: refs/tags/${{ needs.guard.outputs.tag }}
-          sparse-checkout: scripts
-          persist-credentials: false
+          path: ${{ runner.temp }}/out
 
       - name: Refuse a version that is already on nuget.org (--skip-duplicate would make a re-run look green)
         env:
           VERSION: ${{ needs.guard.outputs.version }}
-        run: python3 scripts/release_verify.py not-published --dir out --version "$VERSION"
+        run: python3 scripts/release_verify.py not-published --dir "$RUNNER_TEMP/out" --version "$VERSION"
 
-      - name: Select the authentication mode
-        id: mode
+      - name: Require the trusted-publishing user
         env:
-          NUGET_USER: ${{ secrets.NUGET_USER }}
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_USER: ${{ vars.NUGET_USER }}
         run: |
           set -euo pipefail
-          if [ -n "$NUGET_USER" ]; then echo "mode=oidc" >> "$GITHUB_OUTPUT";
-          elif [ -n "$NUGET_API_KEY" ]; then echo "mode=key" >> "$GITHUB_OUTPUT";
-          else echo "::error::configure NUGET_USER (trusted publishing) or the environment secret NUGET_API_KEY"; exit 1; fi
+          [ -n "$NUGET_USER" ] || { echo "::error::configure the repository variable NUGET_USER (nuget.org trusted publishing); there is no API-key fallback"; exit 1; }
 
       - name: NuGet trusted publishing login (short-lived key)
         id: login
-        if: steps.mode.outputs.mode == 'oidc'
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
-          user: ${{ secrets.NUGET_USER }}
+          user: ${{ vars.NUGET_USER }}
 
       - name: Push to nuget.org (trusted publishing)
-        if: steps.mode.outputs.mode == 'oidc'
         env:
           NUGET_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
-        run: dotnet nuget push "out/*.nupkg" --api-key "$NUGET_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
-
-      - name: Push to nuget.org (environment-scoped key fallback)
-        if: steps.mode.outputs.mode == 'key'
-        env:
-          NUGET_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: dotnet nuget push "out/*.nupkg" --api-key "$NUGET_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push "$RUNNER_TEMP/out/*.nupkg" --api-key "$NUGET_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
   github-release:
     name: github-release
@@ -313,17 +303,25 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Outside the workspace: actions/checkout empties the workspace on a fresh runner, so a download into it would be wiped.
       - name: Download packages
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: packages
-          path: out
+          path: ${{ runner.temp }}/out
 
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.guard.outputs.tag }}
+          SHA: ${{ needs.guard.outputs.sha }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" out/*.nupkg --verify-tag --generate-notes
+          # The tag must still point at the commit that was built, tested and published (it could have been moved meanwhile).
+          read -r type object < <(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '[.object.type, .object.sha] | @tsv')
+          if [ "$type" = "tag" ]; then
+            object="$(gh api "repos/$GH_REPO/git/tags/$object" --jq '.object.sha')"
+          fi
+          if [ "$object" != "$SHA" ]; then echo "::error::tag $TAG no longer points at the published commit"; exit 1; fi
+          gh release create "$TAG" "$RUNNER_TEMP"/out/*.nupkg --verify-tag --generate-notes
