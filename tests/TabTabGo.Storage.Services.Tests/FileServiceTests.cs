@@ -758,6 +758,19 @@ public class FileServiceReplaceAndUpdateTests : IDisposable
     }
 
     [Fact]
+    public async Task GetImage_UndefinedSize_400_BeforeAnyStorageAccess()
+    {
+        var file = await _h.UploadImageAsync();
+        _h.Storage.Tokens.Clear();
+
+        var ex = await Assert.ThrowsAsync<ApiException>(() => _h.Service.GetImage(file.FileId, (ImageSize)99));
+
+        Assert.Equal(HttpStatusCode.BadRequest, ex.HttpStatusCode);
+        Assert.Equal("IMAGE_SIZE_NOT_SUPPORTED", ex.ErrorCode);
+        Assert.Empty(_h.Storage.Tokens);
+    }
+
+    [Fact]
     public async Task Replace_Missing_404() =>
         Assert.Equal(HttpStatusCode.NotFound,
             (await Assert.ThrowsAsync<ApiException>(() => _h.Service.Replace(404, FileServiceHarness.Text()))).HttpStatusCode);
@@ -785,6 +798,38 @@ public class FileServiceReplaceAndUpdateTests : IDisposable
         Assert.Equal([$"Text/{oldPath}"], _h.Storage.Keys());
         Assert.Equal(oldPath, file.FilePath);
         Assert.Equal("note.txt", file.OriginalFileName);
+    }
+
+    [Fact]
+    public async Task Replace_SaveFails_LegacyNullFileSize_StaysNull()
+    {
+        var file = await _h.UploadTextAsync();
+        file.FileSize = null;
+        await _h.Db.Context.SaveChangesAsync();
+        _h.Uow.FailSave = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _h.Service.Replace(file.FileId, FileServiceHarness.Text("n.txt", "new")));
+
+        Assert.Null(file.FileSize);
+    }
+
+    [Theory]
+    [InlineData("ar-SA")]
+    [InlineData("th-TH")]
+    public async Task Upload_DateFolder_IsCultureInvariant(string culture)
+    {
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
+        try
+        {
+            var file = await _h.UploadTextAsync();
+
+            Assert.StartsWith("20310506/", file.FilePath);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
     }
 
     [Fact]

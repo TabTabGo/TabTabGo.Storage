@@ -25,7 +25,14 @@ from `StorageProvider` to inherit the delegating defaults.
 StoragePath.Normalize("a\\b//c.txt");      // "a/b/c.txt"
 StoragePath.Combine("ThumbLarge", "2026"); // "ThumbLarge/2026"
 StoragePath.IsSafe("../x");                // false
+StoragePath.IsSafe("a\u202eb");             // false: Unicode format characters (category Cf) are rejected
+StoragePath.Normalize(path, StoragePathLimits.FileSystem); // also enforces a provider's length limits
 ```
+
+`StoragePathLimits` carries the limits a provider adds: `FileSystem` (segment <= 255 UTF-8 bytes), `AzureBlobName`
+(<= 1024 characters) and `S3ObjectKey(container)` (<= 1024 UTF-8 bytes including `<container>/`; pass the normalised container name, as `S3StorageProvider` does). An over-long path is
+an `ArgumentException` here and a 400 `STORAGE_INVALID_PATH` `StorageException` from the providers. Provider authors call
+`NormalizePath(provider, operation, container, path, limits)`.
 
 ## `FileUpload`
 

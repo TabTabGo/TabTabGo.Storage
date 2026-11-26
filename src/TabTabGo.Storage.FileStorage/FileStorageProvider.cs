@@ -125,7 +125,8 @@ public class FileStorageProvider : StorageProvider
                 return Task.FromResult<Stream?>(null);
             }
 
-            Stream stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read, 4096,
+            Stream stream = new FileStream(full, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete, 4096,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
             return Task.FromResult<Stream?>(stream);
         }
@@ -188,7 +189,7 @@ public class FileStorageProvider : StorageProvider
     {
         ArgumentNullException.ThrowIfNull(options);
         ct.ThrowIfCancellationRequested();
-        var relative = NormalizePath(ProviderName, "GetPublicUrl", container, filePath);
+        var relative = NormalizePath(ProviderName, "GetPublicUrl", container, filePath, StoragePathLimits.FileSystem);
         var baseUrl = _pathService.PathSettings.PublicBaseUrl;
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
@@ -319,7 +320,7 @@ public class FileStorageProvider : StorageProvider
 
     private (string FullPath, string Relative) Resolve(string operation, string container, string filePath)
     {
-        var relative = NormalizePath(ProviderName, operation, container, filePath);
+        var relative = NormalizePath(ProviderName, operation, container, filePath, StoragePathLimits.FileSystem);
         var root = Path.GetFullPath(_pathService.ResolvePath(GetRootDirectory(container)));
         var full = Path.GetFullPath(Path.Combine(root, relative));
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;

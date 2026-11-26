@@ -71,7 +71,7 @@ internal static class FileMetadata<TFile>
 
     public static bool Has(string name) => typeof(TFile).GetProperty(name) is not null;
 
-    /// <summary>Copies the allow-listed fields of a whole-entity update. Null strings keep the current value.</summary>
+    /// <summary>Copies the allow-listed fields of a whole-entity update. A null member keeps the current value (clear one with a JSON patch).</summary>
     public static void CopyFrom(TFile target, TFile source, bool allowExtraProperties)
     {
         if (source.Title is not null)
@@ -85,8 +85,8 @@ internal static class FileMetadata<TFile>
         }
 
         CopyProperty(ReferenceType, target, source, skipNull: true);
-        CopyProperty(ReferenceId, target, source, skipNull: false);
-        CopyProperty(Duration, target, source, skipNull: false);
+        CopyProperty(ReferenceId, target, source, skipNull: true);
+        CopyProperty(Duration, target, source, skipNull: true);
         if (allowExtraProperties)
         {
             MergeExtra(target, source.ExtraProperties);
@@ -169,13 +169,14 @@ internal static class FileMetadata<TFile>
 
         if (query.ReferenceType is not null)
         {
-            And(Expression.Equal(RequireMember(parameter, "ReferenceType"), Expression.Constant(query.ReferenceType)));
+            var member = RequireMember(parameter, "ReferenceType");
+            And(Expression.Equal(member, ConstantFor(member, query.ReferenceType)));
         }
 
         if (query.ReferenceId is { } referenceId)
         {
-            And(Expression.Equal(RequireMember(parameter, "ReferenceId"),
-                Expression.Constant(referenceId, typeof(long?))));
+            var member = RequireMember(parameter, "ReferenceId");
+            And(Expression.Equal(member, ConstantFor(member, referenceId)));
         }
 
         if (query.FileType is { } fileType)
@@ -189,6 +190,43 @@ internal static class FileMetadata<TFile>
         }
 
         return Expression.Lambda<Func<TFile, bool>>(body, parameter);
+    }
+
+    // The consumer entity decides the member's type (string or enum reference type, long or long? reference id): the constant is
+    // converted to it, and a value the member cannot hold is a 400 instead of an expression-tree exception (500).
+    private static ConstantExpression ConstantFor(MemberExpression member, object value)
+    {
+        var memberType = member.Type;
+        var underlying = Nullable.GetUnderlyingType(memberType) ?? memberType;
+        object? converted = null;
+        try
+        {
+            if (underlying.IsEnum)
+            {
+                if (value is string text && Enum.TryParse(underlying, text, ignoreCase: true, out var parsed) &&
+                    Enum.IsDefined(underlying, parsed!))
+                {
+                    converted = parsed;
+                }
+            }
+            else if (underlying == value.GetType())
+            {
+                converted = value;
+            }
+            else if (value is long && underlying.IsPrimitive && underlying != typeof(bool) && underlying != typeof(char))
+            {
+                converted = System.Convert.ChangeType(value, underlying, System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+        catch (Exception ex) when (ex is OverflowException or InvalidCastException or FormatException)
+        {
+            converted = null;
+        }
+
+        return converted is null
+            ? throw new ApiException($"Filtering by {member.Member.Name} with this value is not supported for this file type.", null,
+                LogLevel.Warning, null, HttpStatusCode.BadRequest, "FILTER_NOT_SUPPORTED")
+            : Expression.Constant(converted, memberType);
     }
 
     private static MemberExpression MemberOf(ParameterExpression parameter, string name) =>

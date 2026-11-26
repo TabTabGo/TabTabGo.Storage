@@ -26,7 +26,11 @@ services.AddTabTabGoFileStorage(configuration.GetSection("PathSettings"));
   `PublicBaseUrl/<folder>/<path>`, or `null` when it is not set.
 
 Behaviour: every path is normalised and must stay under the container root (traversal, rooted paths and **symbolic links
-that lead out of the root** throw a 400 `StorageException`; a root that is itself a link is fine); nested folders are created; overwriting writes go to a temporary file in the same folder and are moved into
+that lead out of the root**, and path segments longer than 255 UTF-8 bytes, throw a 400 `StorageException`; a root that is itself a link is fine); nested folders are created; overwriting writes go to a temporary file in the same folder and are moved into
 place (readers never see a partial file); `Overwrite = false` claims the name with an exclusive create (exactly one concurrent
 writer wins, a failed write leaves no partial file); generated names are unique under concurrency; `OpenReadAsync` returns a
 `FileStream`; deleting a missing file is a no-op. The provider is a thread-safe singleton and uses `TimeProvider` (UTC).
+
+## Requirements
+
+`PathService` needs an `IHostEnvironment` (`Microsoft.Extensions.Hosting.Abstractions`, part of the platform on net11.0) to resolve a relative `RootPath` against the content root. The Generic Host / `WebApplication` registers one; a bare `ServiceCollection` must register its own (`services.AddSingleton<IHostEnvironment>(...)`).

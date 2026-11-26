@@ -1,11 +1,11 @@
 version: 2
 
 # Updates target the feature integration branch of the line, never master or a release branch.
-# One file per line branch: this file is the v10 line's.
+# One file per line branch: this file is the v11 line's.
 updates:
   - package-ecosystem: github-actions
     directory: /
-    target-branch: features/storage-v10
+    target-branch: features/storage-v11
     schedule:
       interval: weekly
     commit-message:
@@ -13,7 +13,7 @@ updates:
 
   - package-ecosystem: nuget
     directory: /
-    target-branch: features/storage-v10
+    target-branch: features/storage-v11
     schedule:
       interval: weekly
     commit-message:

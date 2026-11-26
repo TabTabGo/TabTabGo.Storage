@@ -67,6 +67,65 @@ public class FileStorageProviderTests : IDisposable
 
     private static byte[] Bytes(string text) => Encoding.UTF8.GetBytes(text);
 
+    // L1: a segment is at most 255 UTF-8 bytes.
+    [Theory]
+    [InlineData(255, true)]
+    [InlineData(256, false)]
+    public async Task Store_SegmentLength_BoundaryAt255Bytes(int length, bool accepted)
+    {
+        var path = "dir/" + new string('a', length);
+        var task = _h.Provider.StoreAsync(path, Bytes("x"), "Image");
+
+        if (accepted)
+        {
+            Assert.Equal(path, await task);
+            Assert.True(File.Exists(_h.Disk("store", "Image", "dir", new string('a', length))));
+        }
+        else
+        {
+            var ex = await Assert.ThrowsAsync<StorageException>(() => task);
+            Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+            Assert.Equal(System.Net.HttpStatusCode.BadRequest, ex.HttpStatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Store_SegmentLength_CountsUtf8Bytes()
+    {
+        var ex = await Assert.ThrowsAsync<StorageException>(
+            () => _h.Provider.StoreAsync(new string('\u00e9', 128), Bytes("x"), "Image"));
+
+        Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Retrieve_OverLongSegment_Is400_NotIoFailure()
+    {
+        var ex = await Assert.ThrowsAsync<StorageException>(
+            () => _h.Provider.RetrieveAsync(new string('a', 300), "Image"));
+
+        Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+    }
+
+    [Fact]
+    public async Task GetPublicUrl_OverLongSegment_Is400()
+    {
+        var ex = await Assert.ThrowsAsync<StorageException>(
+            () => _h.Provider.GetPublicUrlAsync(new string('a', 300), new PublicUrlOptions(), "Image"));
+
+        Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("a\u202eb.txt")]
+    [InlineData("a\u200bb.txt")]
+    public async Task Store_UnicodeFormatCharacter_Rejected(string path)
+    {
+        var ex = await Assert.ThrowsAsync<StorageException>(() => _h.Provider.StoreAsync(path, Bytes("x"), "Image"));
+
+        Assert.Equal("STORAGE_INVALID_PATH", ex.ErrorCode);
+    }
+
     // F-1
     [Fact]
     public async Task Store_DotDotSegment_Throws_AndWritesNothingOutsideRoot()
@@ -265,6 +324,20 @@ public class FileStorageProviderTests : IDisposable
         await using var stream = await _h.Provider.OpenReadAsync("big.bin", "Image");
 
         Assert.IsType<FileStream>(stream);
+    }
+
+    // A reader streaming an object must not make a concurrent overwrite or delete fail (a sharing violation on Windows).
+    [Fact]
+    public async Task OpenRead_WhileTheObjectIsOverwrittenAndDeleted_DoesNotBlockTheWriter()
+    {
+        await _h.Provider.StoreAsync("live.bin", new byte[4096], "Image");
+        await using var stream = await _h.Provider.OpenReadAsync("live.bin", "Image");
+        Assert.NotNull(stream);
+
+        await _h.Provider.StoreAsync("live.bin", Bytes("replaced"), "Image");
+        await _h.Provider.DeleteAsync("live.bin", "Image");
+
+        Assert.False(await _h.Provider.ExistsAsync("live.bin", "Image"));
     }
 
     [Fact]
